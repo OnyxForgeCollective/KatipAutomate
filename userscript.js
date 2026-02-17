@@ -755,7 +755,7 @@
                 </button>
             </div>
             
-            <div id="info-panel" style="position:absolute; top:0; left:100%; width:100%; height:100%; background:rgba(28, 28, 30, 0.98); border-radius:16px; padding:20px; overflow-y:auto; transform:translateX(10px); opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
+            <div id="info-panel" style="position:absolute; top:0; right:100%; width:280px; height:100%; background:rgba(28, 28, 30, 0.98); border-radius:16px; padding:20px; overflow-y:auto; transform:translateX(-10px); opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1);">
                     <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">ℹ️ Bilgi</span>
                     <span id="btn-close-info" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">×</span>
@@ -774,6 +774,9 @@
                     </ul>
                     <p style="margin:0 0 10px 0;">Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
                     <p style="margin:0 0 10px 0;">Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+                    <p style="margin:0 0 10px 0;">Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+                    <p style="margin:0 0 10px 0;">Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.</p>
+                    <p style="margin:0 0 10px 0;">Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
                     <div style="background:rgba(255,149,0,0.1); border-left:3px solid #ff9500; padding:10px; margin-top:16px; border-radius:4px;">
                         <strong style="color:#ff9500;">⚠️ Uyarı:</strong>
                         <p style="margin:4px 0 0 0; font-size:11px;">Bu araç eğitim amaçlıdır. Kullanımınız kendi sorumluluğunuzdadır.</p>
@@ -784,9 +787,12 @@
 
         Object.assign(panel.style, {
             position: 'fixed',
-            bottom: '24px',
+            top: '50%',
             right: '24px',
+            transform: 'translateY(-50%)',
             width: '280px',
+            height: 'auto',
+            maxHeight: '90vh',
             background: 'rgba(28, 28, 30, 0.95)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
@@ -798,13 +804,15 @@
             fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
             boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            display: config.panelMinimized ? 'none' : 'block',
-            overflow: 'hidden'
+            display: config.panelMinimized ? 'none' : 'flex',
+            overflow: 'visible'
         });
         
-        // Add padding to main panel
+        // Add padding to main panel and make it scrollable
         const mainPanel = panel.querySelector('#main-panel');
         mainPanel.style.padding = '20px';
+        mainPanel.style.overflowY = 'auto';
+        mainPanel.style.maxHeight = '90vh';
 
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
@@ -814,8 +822,9 @@
         icon.setAttribute('tabindex', '0');
         Object.assign(icon.style, {
             position: 'fixed',
-            bottom: '24px',
+            top: '50%',
             right: '24px',
+            transform: 'translateY(-50%)',
             width: '64px',
             height: '64px',
             background: 'rgba(28, 28, 30, 0.95)',
@@ -843,7 +852,7 @@
         document.getElementById('btn-info').onclick = () => {
             if (config.infoExpanded) {
                 // Close info panel
-                infoPanel.style.transform = 'translateX(10px)';
+                infoPanel.style.transform = 'translateX(-10px)';
                 infoPanel.style.opacity = '0';
                 infoPanel.style.pointerEvents = 'none';
                 mainPanelEl.style.transform = 'translateX(0)';
@@ -853,13 +862,13 @@
                 infoPanel.style.transform = 'translateX(0)';
                 infoPanel.style.opacity = '1';
                 infoPanel.style.pointerEvents = 'auto';
-                mainPanelEl.style.transform = 'translateX(-100%)';
+                mainPanelEl.style.transform = 'translateX(0)';
                 config.infoExpanded = true;
             }
         };
         
         document.getElementById('btn-close-info').onclick = () => {
-            infoPanel.style.transform = 'translateX(10px)';
+            infoPanel.style.transform = 'translateX(-10px)';
             infoPanel.style.opacity = '0';
             infoPanel.style.pointerEvents = 'none';
             mainPanelEl.style.transform = 'translateX(0)';
