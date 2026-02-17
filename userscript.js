@@ -340,48 +340,27 @@
         // Update forecast boxes
         const elapsedMinutes = stats.startTime ? (Date.now() - stats.startTime) / 60000 : 0;
         
-        if (wordsWritten3min) {
-            wordsWritten3min.innerText = stats.totalWords;
-        }
-        if (forecast3Est) {
-            const forecast3 = Math.round(stats.estimatedWPM * 3);
-            forecast3Est.innerText = forecast3;
-            
-            // Flash if above threshold
-            if (forecast3Box && stats.totalWords > forecast3 * FORECAST_THRESHOLD) {
-                forecast3Box.style.animation = 'flash-orange 1s infinite';
-            } else if (forecast3Box) {
-                forecast3Box.style.animation = 'none';
+        // Helper function to update forecast box with threshold check
+        function updateForecastBox(displayElement, estElement, boxElement, minutes) {
+            if (displayElement) {
+                displayElement.innerText = stats.totalWords;
+            }
+            if (estElement) {
+                const forecast = Math.round(stats.estimatedWPM * minutes);
+                estElement.innerText = forecast;
+                
+                // Flash if above threshold
+                if (boxElement && stats.totalWords > forecast * FORECAST_THRESHOLD) {
+                    boxElement.style.animation = 'flash-orange 1s infinite';
+                } else if (boxElement) {
+                    boxElement.style.animation = 'none';
+                }
             }
         }
         
-        if (wordsWritten5min) {
-            wordsWritten5min.innerText = stats.totalWords;
-        }
-        if (forecast5Est) {
-            const forecast5 = Math.round(stats.estimatedWPM * 5);
-            forecast5Est.innerText = forecast5;
-            
-            if (forecast5Box && stats.totalWords > forecast5 * FORECAST_THRESHOLD) {
-                forecast5Box.style.animation = 'flash-orange 1s infinite';
-            } else if (forecast5Box) {
-                forecast5Box.style.animation = 'none';
-            }
-        }
-        
-        if (wordsWritten10min) {
-            wordsWritten10min.innerText = stats.totalWords;
-        }
-        if (forecast10Est) {
-            const forecast10 = Math.round(stats.estimatedWPM * 10);
-            forecast10Est.innerText = forecast10;
-            
-            if (forecast10Box && stats.totalWords > forecast10 * FORECAST_THRESHOLD) {
-                forecast10Box.style.animation = 'flash-orange 1s infinite';
-            } else if (forecast10Box) {
-                forecast10Box.style.animation = 'none';
-            }
-        }
+        updateForecastBox(wordsWritten3min, forecast3Est, forecast3Box, 3);
+        updateForecastBox(wordsWritten5min, forecast5Est, forecast5Box, 5);
+        updateForecastBox(wordsWritten10min, forecast10Est, forecast10Box, 10);
 
         // Update last word display
         if (lastWordDisplay) {
@@ -974,7 +953,7 @@
         const mainPanelEl = document.getElementById('main-panel');
         
         // Minimize/Maximize events
-        const DOM_UPDATE_DELAY = 100; // ms delay for DOM height calculation after display changes
+        const DOM_UPDATE_DELAY = 100; // Wait for browser to complete layout recalculation after panel display changes
         
         function updateBodyPadding() {
             if (!config.panelMinimized && panel.style.display !== 'none') {
@@ -1212,7 +1191,7 @@
         if (mistakeRewriteToggle) {
             mistakeRewriteToggle.onchange = function() {
                 config.mistakeRewriteCorrect = this.checked;
-                localStorage.setItem('katip-mistake-rewrite', this.checked);
+                localStorage.setItem('katip-mistake-rewrite', String(this.checked));
                 logger(`Doğrusunu yazma modu ${this.checked ? 'aktif' : 'deaktif'}`);
             };
         }
