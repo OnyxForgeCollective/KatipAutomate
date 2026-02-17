@@ -805,14 +805,14 @@
             boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             display: config.panelMinimized ? 'none' : 'flex',
-            overflow: 'visible'
+            overflow: 'visible'  // Allow info panel (positioned outside) to be visible
         });
         
         // Add padding to main panel and make it scrollable
         const mainPanel = panel.querySelector('#main-panel');
         mainPanel.style.padding = '20px';
         mainPanel.style.overflowY = 'auto';
-        mainPanel.style.maxHeight = '90vh';
+        mainPanel.style.maxHeight = 'calc(90vh - 40px)';  // Account for 20px padding top+bottom
 
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
