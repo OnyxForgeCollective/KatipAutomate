@@ -119,7 +119,7 @@
                 const remaining = Math.max(0, config.wordLimit - stats.totalWords);
                 wordsRemaining.innerText = remaining;
             } else {
-                wordsRemaining.innerText = '0';
+                wordsRemaining.innerText = '—';
             }
         }
     }
@@ -414,7 +414,7 @@
                         </div>
                         <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:6px; border:1px solid rgba(255,149,0,0.2);">
                             <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Kalan</div>
-                            <div style="font-size:14px; color:#ff9500; font-weight:600;"><span id="words-remaining">${config.wordLimit}</span></div>
+                            <div style="font-size:14px; color:#ff9500; font-weight:600;"><span id="words-remaining">${config.wordLimitEnabled ? config.wordLimit : '—'}</span></div>
                         </div>
                     </div>
                 </div>
