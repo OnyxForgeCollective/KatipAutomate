@@ -18,7 +18,9 @@
         active: false,
         delay: parseInt(localStorage.getItem('katip-speed')) || 120, // İki harf arası bekleme süresi (ms)
         debug: true, // Konsolda detaylı hata ayıklama görmek için true
-        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true' // Panel başlangıç durumu
+        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true', // Panel başlangıç durumu
+        wordLimitEnabled: localStorage.getItem('katip-word-limit-enabled') === 'true', // Kelime limiti aktif mi
+        wordLimit: parseInt(localStorage.getItem('katip-word-limit')) || 50 // Kaç kelime yazılacak
     };
 
     // --- İSTATİSTİKLER ---
@@ -50,6 +52,12 @@
         const isSpace = (char === ' ' || char === '\n' || char === '\t');
         if (!isSpace && lastCharWasSpace) {
             stats.totalWords++;
+            
+            // Check if word limit is reached
+            if (config.wordLimitEnabled && stats.totalWords >= config.wordLimit) {
+                logger(`Kelime limiti ulaşıldı: ${stats.totalWords}/${config.wordLimit}`);
+                setTimeout(() => stopBot(), 100); // Stop after current character is processed
+            }
         }
         lastCharWasSpace = isSpace;
 
@@ -85,6 +93,8 @@
         const forecast1 = document.getElementById('forecast-1min');
         const forecast3 = document.getElementById('forecast-3min');
         const forecast5 = document.getElementById('forecast-5min');
+        const wordsWritten = document.getElementById('words-written');
+        const wordsRemaining = document.getElementById('words-remaining');
 
         if (wpmDisplay) {
             wpmDisplay.innerText = stats.currentWPM || 0;
@@ -98,6 +108,19 @@
         }
         if (forecast5) {
             forecast5.innerText = Math.round(stats.currentWPM * 5);
+        }
+        
+        if (wordsWritten) {
+            wordsWritten.innerText = stats.totalWords;
+        }
+        
+        if (wordsRemaining) {
+            if (config.wordLimitEnabled) {
+                const remaining = Math.max(0, config.wordLimit - stats.totalWords);
+                wordsRemaining.innerText = remaining;
+            } else {
+                wordsRemaining.innerText = '—';
+            }
         }
     }
 
@@ -367,6 +390,36 @@
                 </div>
             </div>
 
+            <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Kelime Limiti</label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" id="word-limit-toggle" ${config.wordLimitEnabled ? 'checked' : ''} 
+                            style="width:16px; height:16px; cursor:pointer;">
+                        <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
+                    </label>
+                </div>
+                <div id="word-limit-controls" style="display:${config.wordLimitEnabled ? 'block' : 'none'};">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hedef Kelime Sayısı</span>
+                        <span id="word-limit-val" style="font-size:12px; color:#ffffff; font-weight:600; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:6px;">${config.wordLimit} kelime</span>
+                    </div>
+                    <input type="range" id="word-limit-slider" min="10" max="500" step="10" value="${config.wordLimit}" 
+                        style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
+                        background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:8px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                        <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:6px; border:1px solid rgba(52,199,89,0.2);">
+                            <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Yazılan</div>
+                            <div style="font-size:14px; color:#34c759; font-weight:600;"><span id="words-written">0</span></div>
+                        </div>
+                        <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:6px; border:1px solid rgba(255,149,0,0.2);">
+                            <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Kalan</div>
+                            <div style="font-size:14px; color:#ff9500; font-weight:600;"><span id="words-remaining">${config.wordLimitEnabled ? config.wordLimit : '—'}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div style="margin-bottom:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Yazma Hızı</label>
@@ -492,6 +545,25 @@
             localStorage.setItem('katip-speed', this.value);
         };
 
+        // Word limit toggle olayı
+        const wordLimitToggle = document.getElementById('word-limit-toggle');
+        wordLimitToggle.onchange = function() {
+            config.wordLimitEnabled = this.checked;
+            localStorage.setItem('katip-word-limit-enabled', this.checked);
+            const controls = document.getElementById('word-limit-controls');
+            controls.style.display = this.checked ? 'block' : 'none';
+            logger(`Kelime limiti ${this.checked ? 'aktif' : 'deaktif'}`);
+        };
+
+        // Word limit slider olayı
+        const wordLimitSlider = document.getElementById('word-limit-slider');
+        wordLimitSlider.oninput = function() {
+            config.wordLimit = parseInt(this.value);
+            document.getElementById('word-limit-val').innerText = this.value + " kelime";
+            localStorage.setItem('katip-word-limit', this.value);
+            updateStatsDisplay();
+        };
+
         // Slider stili
         const style = document.createElement('style');
         style.textContent = `
@@ -523,6 +595,35 @@
             #bot-slider::-moz-range-thumb:hover {
                 transform: scale(1.2);
                 box-shadow: 0 4px 12px rgba(0,122,255,0.6);
+            }
+            #word-limit-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #34c759;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(52,199,89,0.4);
+                transition: all 0.2s;
+            }
+            #word-limit-slider::-webkit-slider-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 12px rgba(52,199,89,0.6);
+            }
+            #word-limit-slider::-moz-range-thumb {
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #34c759;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 2px 8px rgba(52,199,89,0.4);
+                transition: all 0.2s;
+            }
+            #word-limit-slider::-moz-range-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 12px rgba(52,199,89,0.6);
             }
         `;
         document.head.appendChild(style);
