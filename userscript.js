@@ -41,12 +41,17 @@
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
     // --- İSTATİSTİK FONKSİYONLARI ---
+    let lastCharWasSpace = true; // Start as true so first word counts properly
+    
     function updateStats(char) {
         stats.totalChars++;
-        // Word count: increment when we type a space after a non-space character
-        if ((char === ' ' || char === '\n') && stats.totalChars > 1) {
+        
+        // Count words properly: increment when transitioning from space to non-space
+        const isSpace = (char === ' ' || char === '\n' || char === '\t');
+        if (!isSpace && lastCharWasSpace) {
             stats.totalWords++;
         }
+        lastCharWasSpace = isSpace;
 
         if (stats.startTime) {
             const elapsedMinutes = (Date.now() - stats.startTime) / 60000;
@@ -61,6 +66,7 @@
         stats.totalChars = 0;
         stats.totalWords = 0;
         stats.currentWPM = 0;
+        lastCharWasSpace = true; // Reset word boundary tracking
 
         // Her saniye istatistikleri güncelle
         if (stats.updateInterval) clearInterval(stats.updateInterval);
@@ -303,7 +309,7 @@
         const status = document.getElementById('bot-status');
         if (btn && status) {
             if (isRunning) {
-                btn.innerText = "⏸ Durdur";
+                btn.innerText = "⏹ Durdur";
                 btn.style.background = "linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%)";
                 status.innerText = "Aktif";
                 status.style.color = "#34c759";
@@ -406,6 +412,9 @@
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
         icon.innerText = '⌨️';
+        icon.setAttribute('role', 'button');
+        icon.setAttribute('aria-label', 'Paneli Aç');
+        icon.setAttribute('tabindex', '0');
         Object.assign(icon.style, {
             position: 'fixed',
             bottom: '24px',
