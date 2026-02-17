@@ -268,6 +268,7 @@
     }
 
     function updateStatsDisplay() {
+        const FORECAST_THRESHOLD = 0.9; // 90% threshold for flashing
         const wpmCalculated = document.getElementById('wpm-calculated');
         const wpmEstimated = document.getElementById('wpm-estimated');
         const wordsWritten = document.getElementById('words-written');
@@ -346,8 +347,8 @@
             const forecast3 = Math.round(stats.estimatedWPM * 3);
             forecast3Est.innerText = forecast3;
             
-            // Flash if above threshold (e.g., 90% of target)
-            if (forecast3Box && stats.totalWords > forecast3 * 0.9) {
+            // Flash if above threshold
+            if (forecast3Box && stats.totalWords > forecast3 * FORECAST_THRESHOLD) {
                 forecast3Box.style.animation = 'flash-orange 1s infinite';
             } else if (forecast3Box) {
                 forecast3Box.style.animation = 'none';
@@ -361,7 +362,7 @@
             const forecast5 = Math.round(stats.estimatedWPM * 5);
             forecast5Est.innerText = forecast5;
             
-            if (forecast5Box && stats.totalWords > forecast5 * 0.9) {
+            if (forecast5Box && stats.totalWords > forecast5 * FORECAST_THRESHOLD) {
                 forecast5Box.style.animation = 'flash-orange 1s infinite';
             } else if (forecast5Box) {
                 forecast5Box.style.animation = 'none';
@@ -375,7 +376,7 @@
             const forecast10 = Math.round(stats.estimatedWPM * 10);
             forecast10Est.innerText = forecast10;
             
-            if (forecast10Box && stats.totalWords > forecast10 * 0.9) {
+            if (forecast10Box && stats.totalWords > forecast10 * FORECAST_THRESHOLD) {
                 forecast10Box.style.animation = 'flash-orange 1s infinite';
             } else if (forecast10Box) {
                 forecast10Box.style.animation = 'none';
@@ -710,7 +711,7 @@
         const panel = document.createElement('div');
         panel.id = 'katip-v12-panel';
         panel.innerHTML = `
-            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
+            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
                 <!-- Left: Status and Controls -->
                 <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -755,7 +756,7 @@
                     <div id="word-counter-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:8px 12px; border:1px solid rgba(255,149,0,0.2); min-width: 100px;">
                         <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">📊 Kelime</div>
                         <div id="word-counter-display" style="font-size:14px; font-weight:600; color:#ff9500;">
-                            <span id="words-written">0</span><span id="word-separator" style="display:none;">/<span id="words-remaining">—</span>/<span id="words-limit">—</span></span>
+                            <span id="words-written">0</span><span id="word-separator" style="display:none;"> / <span id="words-remaining">—</span> / <span id="words-limit">—</span></span>
                         </div>
                     </div>
                 </div>
@@ -972,6 +973,19 @@
         const settingsPanel = document.getElementById('settings-panel');
         const mainPanelEl = document.getElementById('main-panel');
         
+        // Minimize/Maximize events
+        const DOM_UPDATE_DELAY = 100; // ms delay for DOM height calculation after display changes
+        
+        function updateBodyPadding() {
+            if (!config.panelMinimized && panel.style.display !== 'none') {
+                const panelHeight = panel.offsetHeight;
+                document.documentElement.style.setProperty('--katip-panel-height', `${panelHeight}px`);
+                document.body.classList.add('katip-panel-open');
+            } else {
+                document.body.classList.remove('katip-panel-open');
+            }
+        }
+        
         document.getElementById('btn-settings').onclick = () => {
             if (settingsPanel.style.opacity === '1') {
                 // Close settings panel
@@ -984,26 +998,15 @@
                 settingsPanel.style.pointerEvents = 'auto';
                 panel.style.borderRadius = '0';
             }
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
         
         document.getElementById('btn-close-settings').onclick = () => {
             settingsPanel.style.opacity = '0';
             settingsPanel.style.pointerEvents = 'none';
             panel.style.borderRadius = '12px 12px 0 0';
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
-
-        // Minimize/Maximize events
-        const PANEL_ANIMATION_DELAY = 100; // ms delay for panel height calculation
-        
-        function updateBodyPadding() {
-            if (!config.panelMinimized && panel.style.display !== 'none') {
-                const panelHeight = panel.offsetHeight;
-                document.documentElement.style.setProperty('--katip-panel-height', `${panelHeight}px`);
-                document.body.classList.add('katip-panel-open');
-            } else {
-                document.body.classList.remove('katip-panel-open');
-            }
-        }
         
         document.getElementById('btn-minimize').onclick = () => {
             panel.style.display = 'none';
@@ -1018,24 +1021,13 @@
             panel.style.display = 'block';
             config.panelMinimized = false;
             localStorage.setItem('katip-panel-minimized', 'false');
-            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
         
         // Update padding when panel is first shown
         if (!config.panelMinimized) {
-            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         }
-        
-        // Enhance settings toggle to update padding
-        const settingsBtnOriginal = document.getElementById('btn-settings');
-        settingsBtnOriginal.addEventListener('click', () => {
-            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
-        });
-        
-        const closeBtnOriginal = document.getElementById('btn-close-settings');
-        closeBtnOriginal.addEventListener('click', () => {
-            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
-        });
 
         // Hover effects
         const minimizeBtn = document.getElementById('btn-minimize');
