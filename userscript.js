@@ -851,18 +851,18 @@
         
         document.getElementById('btn-info').onclick = () => {
             if (config.infoExpanded) {
-                // Close info panel
+                // Close info panel - main panel slides back to center
                 infoPanel.style.transform = 'translateX(-10px)';
                 infoPanel.style.opacity = '0';
                 infoPanel.style.pointerEvents = 'none';
                 mainPanelEl.style.transform = 'translateX(0)';
                 config.infoExpanded = false;
             } else {
-                // Open info panel
+                // Open info panel - main panel slides right, info panel slides in from left
                 infoPanel.style.transform = 'translateX(0)';
                 infoPanel.style.opacity = '1';
                 infoPanel.style.pointerEvents = 'auto';
-                mainPanelEl.style.transform = 'translateX(0)';
+                mainPanelEl.style.transform = 'translateX(100%)';
                 config.infoExpanded = true;
             }
         };
