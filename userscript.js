@@ -404,7 +404,7 @@
 
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
-        icon.innerHTML = '<span style="font-size:18px;">⌨️</span>';
+        icon.innerText = '⌨️';
         Object.assign(icon.style, {
             position: 'fixed',
             bottom: '24px',
@@ -423,7 +423,7 @@
             cursor: 'pointer',
             zIndex: '999999',
             fontWeight: 'bold',
-            fontSize: '20px',
+            fontSize: '24px',
             boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         });

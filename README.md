@@ -122,9 +122,9 @@ Bu script'i kullanabilmek için öncelikle bir **userscript yöneticisi** eklent
 - Bot hemen duracak
 
 #### 7. Paneli Gizleme
-- Panel başlığındaki **"_"** işaretine tıklayın
-- Panel küçülecek, sadece **"K"** harfi görünecek
-- Tekrar açmak için "K" harfine tıklayın
+- Panel başlığındaki **"−"** işaretine tıklayın
+- Panel küçülecek, sadece **⌨️** emojisi görünecek
+- Tekrar açmak için emoji ikonuna tıklayın
 
 ---
 
