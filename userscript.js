@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.1
+// @version      v2.2
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
