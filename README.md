@@ -113,12 +113,12 @@ Bu script'i kullanabilmek için öncelikle bir **userscript yöneticisi** eklent
 
 #### 5. Botu Başlatma
 - Sayfada yazılacak metin göründüğünde
-- **"BAŞLAT"** butonuna tıklayın
+- **"▶ Başlat"** butonuna tıklayın
 - Bot otomatik olarak yazmaya başlayacak
-- Durum: **"ÇALIŞIYOR"** olarak değişecek (yeşil renk)
+- Durum: **"Aktif"** olarak değişecek (yeşil renk)
 
 #### 6. Durdurma
-- İstediğiniz zaman **"DURDUR"** butonuna tıklayabilirsiniz
+- İstediğiniz zaman **"⏸ Durdur"** butonuna tıklayabilirsiniz
 - Bot hemen duracak
 
 #### 7. Paneli Gizleme

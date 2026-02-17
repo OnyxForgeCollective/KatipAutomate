@@ -84,7 +84,7 @@
         }
 
         if (forecast1) {
-            forecast1.innerText = Math.round(stats.currentWPM * 1);
+            forecast1.innerText = stats.currentWPM;
         }
         if (forecast3) {
             forecast3.innerText = Math.round(stats.currentWPM * 3);
