@@ -114,9 +114,13 @@
             wordsWritten.innerText = stats.totalWords;
         }
         
-        if (wordsRemaining && config.wordLimitEnabled) {
-            const remaining = Math.max(0, config.wordLimit - stats.totalWords);
-            wordsRemaining.innerText = remaining;
+        if (wordsRemaining) {
+            if (config.wordLimitEnabled) {
+                const remaining = Math.max(0, config.wordLimit - stats.totalWords);
+                wordsRemaining.innerText = remaining;
+            } else {
+                wordsRemaining.innerText = '0';
+            }
         }
     }
 
