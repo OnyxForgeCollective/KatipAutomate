@@ -24,8 +24,9 @@
         wordLimitEnabled: localStorage.getItem('katip-word-limit-enabled') === 'true', // Kelime limiti aktif mi
         wordLimit: parseInt(localStorage.getItem('katip-word-limit')) || 50, // Kaç kelime yazılacak
         infoExpanded: false, // Info panel durumu
-        mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none', // none, basic, advanced
+        mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none', // none, basic, advanced, custom
         mistakeRate: parseInt(localStorage.getItem('katip-mistake-rate')) || 3, // Her kaç kelimede bir hata
+        mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 50, // Hata yapma şansı (%)
         humanLikeTyping: localStorage.getItem('katip-human-like') === 'true' // İnsan gibi yazma modu
     };
 
@@ -36,7 +37,9 @@
         totalWords: 0,
         currentWPM: 0,
         estimatedWPM: 0,
-        updateInterval: null
+        updateInterval: null,
+        lastWord: '',
+        lastWordCorrect: true
     };
 
     const logger = (msg, type = 'info') => {
@@ -259,16 +262,41 @@
         const forecast5Est = document.getElementById('forecast-5min-est');
         const wordsWritten = document.getElementById('words-written');
         const wordsRemaining = document.getElementById('words-remaining');
+        const lastWordDisplay = document.getElementById('last-word-display');
+        const lastWordStatus = document.getElementById('last-word-status');
 
         // Güncelleme sırasında tahmini yeniden hesapla
         stats.estimatedWPM = calculateEstimatedWPM();
 
+        // Color coding based on WPM
+        const calcWPM = stats.currentWPM || 0;
+        const estWPM = stats.estimatedWPM || 0;
+        
+        // Function to get color and animation based on WPM
+        function getWPMStyle(wpm) {
+            if (wpm > 150) {
+                return { color: '#ff3b30', animation: 'flash-red 0.5s infinite' };
+            } else if (wpm > 120) {
+                return { color: '#ff3b30', animation: 'none' };
+            } else if (wpm > 80) {
+                return { color: '#ffcc00', animation: 'none' };
+            } else {
+                return { color: '#007aff', animation: 'none' };
+            }
+        }
+
         if (wpmCalculated) {
-            wpmCalculated.innerText = stats.currentWPM || 0;
+            const calcStyle = getWPMStyle(calcWPM);
+            wpmCalculated.innerText = calcWPM;
+            wpmCalculated.style.color = calcStyle.color;
+            wpmCalculated.style.animation = calcStyle.animation;
         }
         
         if (wpmEstimated) {
-            wpmEstimated.innerText = stats.estimatedWPM || 0;
+            const estStyle = getWPMStyle(estWPM);
+            wpmEstimated.innerText = estWPM;
+            wpmEstimated.style.color = estStyle.color;
+            wpmEstimated.style.animation = estStyle.animation;
         }
 
         if (forecast1Calc) {
@@ -302,6 +330,15 @@
             } else {
                 wordsRemaining.innerText = '—';
             }
+        }
+
+        // Update last word display
+        if (lastWordDisplay) {
+            lastWordDisplay.innerText = stats.lastWord || '—';
+        }
+        if (lastWordStatus) {
+            lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
+            lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
         }
     }
 
@@ -510,15 +547,24 @@
             logger(`Kelime yazılıyor: ${wordToType}`);
             
             // Check if we should make a mistake on this word
-            const shouldMakeMistake = (
-                (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') &&
-                wordCount > 0 &&
-                wordCount % config.mistakeRate === 0 &&
-                wordToType.length > 2
-            );
+            let shouldMakeMistake = false;
+            if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
+                shouldMakeMistake = (
+                    wordCount > 0 &&
+                    wordCount % config.mistakeRate === 0 &&
+                    wordToType.length > 2
+                );
+            } else if (config.mistakeMode === 'custom') {
+                // Custom mode: use percentage chance
+                shouldMakeMistake = (
+                    Math.random() * 100 < config.mistakeChance &&
+                    wordToType.length > 2
+                );
+            }
             
-            if (shouldMakeMistake && config.mistakeMode === 'advanced') {
-                await typeWithMistake(input, wordToType);
+            let wordWasCorrect = true;
+            if (shouldMakeMistake && (config.mistakeMode === 'advanced' || config.mistakeMode === 'custom')) {
+                wordWasCorrect = await typeWithMistake(input, wordToType);
             } else {
                 for (let i = 0; i < wordToType.length; i++) {
                     if (!config.active) break;
@@ -527,6 +573,10 @@
                     await sleep(delay);
                 }
             }
+
+            // Track last word and whether it was correct
+            stats.lastWord = wordToType;
+            stats.lastWordCorrect = !shouldMakeMistake || wordWasCorrect;
 
             if (config.active) {
                 simulateKey(input, ' ');
@@ -599,187 +649,163 @@
         const panel = document.createElement('div');
         panel.id = 'katip-v12-panel';
         panel.innerHTML = `
-            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1);">
+            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%;">
+                <!-- Left: Status and Controls -->
+                <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <div style="width:8px; height:8px; border-radius:50%; background:#34c759; box-shadow:0 0 8px rgba(52,199,89,0.6);"></div>
-                        <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">KatipOnline</span>
+                        <span style="font-weight:600; font-size:14px; color:#ffffff; letter-spacing:-0.3px;">KatipOnline</span>
                     </div>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <span id="btn-info" title="Bilgi" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:16px; font-weight:500; transition:all 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">ℹ️</span>
-                        <span id="btn-minimize" title="Küçült" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">−</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:11px; color:rgba(255,255,255,0.6); font-weight:500;">Durum:</span>
+                        <span id="bot-status" style="font-size:11px; color:#ff9500; font-weight:600;">Bekliyor</span>
                     </div>
-                </div>
-                
-                <div style="margin-bottom:16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Durum</span>
-                        <span id="bot-status" style="font-size:12px; color:#ff9500; font-weight:600;">Bekliyor</span>
-                    </div>
+                    <button id="btn-main" 
+                        style="padding:8px 16px; background:linear-gradient(135deg, #007aff 0%, #0051d5 100%); 
+                        color:#fff; border:none; cursor:pointer; font-weight:600; font-size:12px; 
+                        border-radius:8px; transition:all 0.3s; box-shadow:0 2px 8px rgba(0,122,255,0.3); 
+                        letter-spacing:0.3px; white-space: nowrap;">
+                        ▶ Başlat
+                    </button>
                 </div>
 
-                <div style="background:linear-gradient(135deg, rgba(0,122,255,0.08) 0%, rgba(52,199,89,0.08) 100%); border-radius:12px; padding:14px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.08); box-shadow:inset 0 1px 3px rgba(255,255,255,0.1);">
-                    <div style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px; text-align:center;">📊 WPM İstatistikleri</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-                        <div style="background:linear-gradient(135deg, rgba(0,122,255,0.15) 0%, rgba(0,122,255,0.05) 100%); border-radius:10px; padding:10px; border:1px solid rgba(0,122,255,0.3); box-shadow:0 2px 8px rgba(0,122,255,0.15);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">📈 Calculated</div>
-                            <div style="font-size:20px; color:#007aff; font-weight:700; text-shadow:0 0 10px rgba(0,122,255,0.4);"><span id="wpm-calculated">0</span> <span style="font-size:11px; opacity:0.7;">WPM</span></div>
-                        </div>
-                        <div style="background:linear-gradient(135deg, rgba(52,199,89,0.15) 0%, rgba(52,199,89,0.05) 100%); border-radius:10px; padding:10px; border:1px solid rgba(52,199,89,0.3); box-shadow:0 2px 8px rgba(52,199,89,0.15);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⚡ Estimated</div>
-                            <div style="font-size:20px; color:#34c759; font-weight:700; text-shadow:0 0 10px rgba(52,199,89,0.4);"><span id="wpm-estimated">0</span> <span style="font-size:11px; opacity:0.7;">WPM</span></div>
+                <!-- Center: Stats (Horizontal) -->
+                <div style="display: flex; gap: 10px; flex: 1; overflow-x: auto;">
+                    <!-- WPM Stats -->
+                    <div id="wpm-calc-box" style="background:linear-gradient(135deg, rgba(0,122,255,0.15) 0%, rgba(0,122,255,0.05) 100%); border-radius:8px; padding:8px 12px; border:1px solid rgba(0,122,255,0.3); min-width: 140px;">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">📈 Ortalama yazım hızı</div>
+                        <div style="font-size:16px; font-weight:700;"><span id="wpm-calculated" style="color:#007aff; text-shadow:0 0 10px rgba(0,122,255,0.4);">0</span> <span style="font-size:10px; opacity:0.7; color:#007aff;">WPM</span></div>
+                    </div>
+                    <div id="wpm-est-box" style="background:linear-gradient(135deg, rgba(52,199,89,0.15) 0%, rgba(52,199,89,0.05) 100%); border-radius:8px; padding:8px 12px; border:1px solid rgba(52,199,89,0.3); min-width: 140px;">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">⚡ Hedeflenen yazım hızı</div>
+                        <div style="font-size:16px; font-weight:700;"><span id="wpm-estimated" style="color:#34c759; text-shadow:0 0 10px rgba(52,199,89,0.4);">0</span> <span style="font-size:10px; opacity:0.7; color:#34c759;">WPM</span></div>
+                    </div>
+                    
+                    <!-- Last Word Display -->
+                    <div style="background:rgba(255,255,255,0.05); border-radius:8px; padding:8px 12px; border:1px solid rgba(255,255,255,0.1); min-width: 120px;">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">📝 Son Kelime</div>
+                        <div style="font-size:14px; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <span id="last-word-display" style="color:#ffffff;">—</span>
+                            <span id="last-word-status" style="font-size:16px;"></span>
                         </div>
                     </div>
-                    <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">📈 Calculated Forecast</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:10px;">
-                        <div style="background:rgba(0,122,255,0.1); border-radius:8px; padding:7px; border:1px solid rgba(0,122,255,0.2);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">1 dk</div>
-                            <div style="font-size:14px; color:#007aff; font-weight:600;"><span id="forecast-1min-calc">0</span></div>
-                        </div>
-                        <div style="background:rgba(0,122,255,0.1); border-radius:8px; padding:7px; border:1px solid rgba(0,122,255,0.2);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">3 dk</div>
-                            <div style="font-size:14px; color:#007aff; font-weight:600;"><span id="forecast-3min-calc">0</span></div>
-                        </div>
-                        <div style="background:rgba(0,122,255,0.1); border-radius:8px; padding:7px; border:1px solid rgba(0,122,255,0.2);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">5 dk</div>
-                            <div style="font-size:14px; color:#007aff; font-weight:600;"><span id="forecast-5min-calc">0</span></div>
-                        </div>
-                    </div>
-                    <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">⚡ Estimated Forecast</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
-                        <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:7px; border:1px solid rgba(52,199,89,0.2);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">1 dk</div>
-                            <div style="font-size:14px; color:#34c759; font-weight:600;"><span id="forecast-1min-est">0</span></div>
-                        </div>
-                        <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:7px; border:1px solid rgba(52,199,89,0.2);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">3 dk</div>
-                            <div style="font-size:14px; color:#34c759; font-weight:600;"><span id="forecast-3min-est">0</span></div>
-                        </div>
-                        <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:7px; border:1px solid rgba(52,199,89,0.2);">
-                            <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">5 dk</div>
-                            <div style="font-size:14px; color:#34c759; font-weight:600;"><span id="forecast-5min-est">0</span></div>
+                    
+                    <!-- Word Counter (if enabled) -->
+                    <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:8px 12px; border:1px solid rgba(255,149,0,0.2); min-width: 100px;">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">📊 Kelime</div>
+                        <div style="font-size:14px; font-weight:600; color:#ff9500;">
+                            <span id="words-written">0</span>/<span id="words-remaining">—</span>
                         </div>
                     </div>
                 </div>
 
-                <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.08);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">🎯 Kelime Limiti</label>
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="word-limit-toggle" ${config.wordLimitEnabled ? 'checked' : ''} 
-                                style="width:16px; height:16px; cursor:pointer;">
-                            <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
-                        </label>
-                    </div>
-                    <div id="word-limit-controls" style="display:${config.wordLimitEnabled ? 'block' : 'none'};">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
-                            <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hedef Kelime Sayısı</span>
-                            <input type="number" id="word-limit-input" min="10" max="1500" value="${config.wordLimit}"
-                                aria-label="Hedef kelime sayısı"
-                                style="width:70px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
-                        </div>
-                        <input type="range" id="word-limit-slider" min="10" max="1500" step="10" value="${config.wordLimit}" 
-                            style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
-                            background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:8px;">
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:6px; border:1px solid rgba(52,199,89,0.2);">
-                                <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Yazılan</div>
-                                <div style="font-size:14px; color:#34c759; font-weight:600;"><span id="words-written">0</span></div>
-                            </div>
-                            <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:6px; border:1px solid rgba(255,149,0,0.2);">
-                                <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Kalan</div>
-                                <div style="font-size:14px; color:#ff9500; font-weight:600;"><span id="words-remaining">${config.wordLimitEnabled ? config.wordLimit : '—'}</span></div>
-                            </div>
-                        </div>
-                    </div>
+                <!-- Right: Controls -->
+                <div style="display:flex; gap:8px; align-items:center; flex-shrink: 0;">
+                    <span id="btn-settings" title="Ayarlar" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; transition:all 0.2s; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:6px;">⚙️</span>
+                    <span id="btn-minimize" title="Küçült" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:6px;">−</span>
                 </div>
-
-                <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.08);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">🤖 İnsan Gibi Yaz</label>
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="human-like-toggle" ${config.humanLikeTyping ? 'checked' : ''} 
-                                style="width:16px; height:16px; cursor:pointer;">
-                            <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
-                        </label>
-                    </div>
-                    <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4;">Değişken hız ve rastgele duraklamalar ekler</div>
-                </div>
-
-                <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.08);">
-                    <div style="margin-bottom:8px;">
-                        <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500; display:block; margin-bottom:8px;">❌ Hata Modu</label>
-                        <select id="mistake-mode" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#ffffff; font-size:12px; cursor:pointer;">
-                            <option value="none" ${config.mistakeMode === 'none' ? 'selected' : ''}>Kapalı</option>
-                            <option value="basic" ${config.mistakeMode === 'basic' ? 'selected' : ''}>Basit Mod</option>
-                            <option value="advanced" ${config.mistakeMode === 'advanced' ? 'selected' : ''}>Gelişmiş Mod</option>
-                        </select>
-                    </div>
-                    <div id="mistake-controls" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'};">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                            <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
-                            <input type="number" id="mistake-rate-input" min="2" max="10" value="${config.mistakeRate}"
-                                style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
-                        </div>
-                        <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">
-                            <strong>Gelişmiş:</strong> Hatalı yazar, %70 ihtimalle düzeltir
-                        </div>
-                    </div>
-                </div>
-
-                <div style="margin-bottom:16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
-                        <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">⚡ Yazma Hızı</label>
-                        <input type="number" id="speed-input" min="1" max="300" value="${config.delay}"
-                            aria-label="Yazma hızı (milisaniye)"
-                            style="width:70px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                            border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
-                    </div>
-                    <input type="range" id="bot-slider" min="1" max="300" step="1" value="${config.delay}" 
-                        style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
-                        background:rgba(255,255,255,0.1); cursor:pointer;">
-                    <div style="display:flex; justify-content:space-between; margin-top:4px;">
-                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">Hızlı (1ms)</span>
-                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">Yavaş (300ms)</span>
-                    </div>
-                </div>
-
-                <button id="btn-main" 
-                    style="width:100%; padding:12px; background:linear-gradient(135deg, #007aff 0%, #0051d5 100%); 
-                    color:#fff; border:none; cursor:pointer; font-weight:600; font-size:13px; 
-                    border-radius:10px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,122,255,0.3); 
-                    letter-spacing:0.3px;">
-                    ▶ Başlat
-                </button>
             </div>
             
-            <div id="info-panel" style="position:absolute; top:0; right:100%; width:280px; height:100%; background:rgba(28, 28, 30, 0.98); border-radius:16px; padding:20px; overflow-y:auto; opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1);">
+            <!-- Settings Panel (slides up from bottom) -->
+            <div id="settings-panel" style="position:absolute; bottom:100%; left:0; right:0; background:rgba(28, 28, 30, 0.98); border-radius:12px 12px 0 0; padding:16px; opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 -8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1); border-bottom:none; max-height: 400px; overflow-y: auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1);">
-                    <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">ℹ️ Bilgi</span>
-                    <span id="btn-close-info" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">×</span>
+                    <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">⚙️ Ayarlar</span>
+                    <span id="btn-close-settings" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">×</span>
                 </div>
-                <div style="color:rgba(255,255,255,0.8); font-size:12px; line-height:1.6;">
-                    <h3 style="color:#007aff; font-size:14px; margin:0 0 12px 0;">KatipOnline Fucker v2.1</h3>
-                    <p style="margin:0 0 10px 0;">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-                    <p style="margin:0 0 10px 0;">Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
-                    <h4 style="color:#34c759; font-size:13px; margin:16px 0 8px 0;">Özellikler</h4>
-                    <ul style="margin:0 0 10px 0; padding-left:20px;">
-                        <li>Otomatik yazım asistanı</li>
-                        <li>WPM hesaplama ve tahmin</li>
-                        <li>İnsan gibi yazma modu</li>
-                        <li>Gelişmiş hata yapma sistemi</li>
-                        <li>Kelime limiti desteği</li>
-                    </ul>
-                    <p style="margin:0 0 10px 0;">Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
-                    <p style="margin:0 0 10px 0;">Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
-                    <p style="margin:0 0 10px 0;">Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
-                    <p style="margin:0 0 10px 0;">Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.</p>
-                    <p style="margin:0 0 10px 0;">Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
-                    <div style="background:rgba(255,149,0,0.1); border-left:3px solid #ff9500; padding:10px; margin-top:16px; border-radius:4px;">
-                        <strong style="color:#ff9500;">⚠️ Uyarı:</strong>
-                        <p style="margin:4px 0 0 0; font-size:11px;">Bu araç eğitim amaçlıdır. Kullanımınız kendi sorumluluğunuzdadır.</p>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <!-- Left Column -->
+                    <div>
+                        <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:12px; border:1px solid rgba(255,255,255,0.08);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">⚡ Yazma Hızı</label>
+                                <input type="number" id="speed-input" min="1" max="300" value="${config.delay}"
+                                    style="width:60px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                    border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                            </div>
+                            <input type="range" id="bot-slider" min="1" max="300" step="1" value="${config.delay}" 
+                                style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
+                                background:rgba(255,255,255,0.1); cursor:pointer;">
+                            <div style="display:flex; justify-content:space-between; margin-top:4px;">
+                                <span style="font-size:9px; color:rgba(255,255,255,0.4);">Hızlı (1ms)</span>
+                                <span style="font-size:9px; color:rgba(255,255,255,0.4);">Yavaş (300ms)</span>
+                            </div>
+                        </div>
+
+                        <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:12px; border:1px solid rgba(255,255,255,0.08);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">🎯 Kelime Limiti</label>
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="checkbox" id="word-limit-toggle" ${config.wordLimitEnabled ? 'checked' : ''} 
+                                        style="width:16px; height:16px; cursor:pointer;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
+                                </label>
+                            </div>
+                            <div id="word-limit-controls" style="display:${config.wordLimitEnabled ? 'block' : 'none'};">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hedef</span>
+                                    <input type="number" id="word-limit-input" min="10" max="1500" value="${config.wordLimit}"
+                                        style="width:60px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                </div>
+                                <input type="range" id="word-limit-slider" min="10" max="1500" step="10" value="${config.wordLimit}" 
+                                    style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
+                                    background:rgba(255,255,255,0.1); cursor:pointer;">
+                            </div>
+                        </div>
+
+                        <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; border:1px solid rgba(255,255,255,0.08);">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">🤖 İnsan Gibi Yaz</label>
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="checkbox" id="human-like-toggle" ${config.humanLikeTyping ? 'checked' : ''} 
+                                        style="width:16px; height:16px; cursor:pointer;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
+                                </label>
+                            </div>
+                            <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">Değişken hız ve rastgele duraklamalar</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Right Column -->
+                    <div>
+                        <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; border:1px solid rgba(255,255,255,0.08);">
+                            <div style="margin-bottom:8px;">
+                                <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500; display:block; margin-bottom:8px;">❌ Hata Modu</label>
+                                <select id="mistake-mode" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#ffffff; font-size:12px; cursor:pointer;">
+                                    <option value="none" ${config.mistakeMode === 'none' ? 'selected' : ''}>Kapalı</option>
+                                    <option value="basic" ${config.mistakeMode === 'basic' ? 'selected' : ''}>Basit Mod</option>
+                                    <option value="advanced" ${config.mistakeMode === 'advanced' ? 'selected' : ''}>Gelişmiş Mod</option>
+                                    <option value="custom" ${config.mistakeMode === 'custom' ? 'selected' : ''}>Özel Mod</option>
+                                </select>
+                            </div>
+                            <div id="mistake-controls" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'};">
+                                <div id="mistake-rate-control" style="display:${config.mistakeMode === 'basic' || config.mistakeMode === 'advanced' ? 'block' : 'none'}; margin-bottom:8px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
+                                        <input type="number" id="mistake-rate-input" min="2" max="10" value="${config.mistakeRate}"
+                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                </div>
+                                <div id="mistake-chance-control" style="display:${config.mistakeMode === 'custom' ? 'block' : 'none'};">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata yapma ihtimali</span>
+                                        <input type="number" id="mistake-chance-input" min="0" max="100" value="${config.mistakeChance}"
+                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                    <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4;">
+                                        <strong>%<span id="mistake-chance-display">${config.mistakeChance}</span></strong> ihtimalle hata yapılır
+                                    </div>
+                                </div>
+                                <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">
+                                    <div style="margin-bottom:4px;"><strong>Basit:</strong> Sadece takip edilir</div>
+                                    <div style="margin-bottom:4px;"><strong>Gelişmiş:</strong> Hata yazar, %70 düzeltir</div>
+                                    <div><strong>Özel:</strong> İhtimal bazlı hata yapma</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -787,51 +813,49 @@
 
         Object.assign(panel.style, {
             position: 'fixed',
-            top: '50%',
-            right: '24px',
-            transform: 'translateY(-50%)',
-            width: '280px',
+            bottom: '0',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'calc(100% - 40px)',
+            maxWidth: '1400px',
             height: 'auto',
-            maxHeight: '90vh',
             background: 'rgba(28, 28, 30, 0.95)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
             color: 'white',
-            padding: '0',
-            borderRadius: '16px',
+            padding: '12px 20px',
+            borderRadius: '12px 12px 0 0',
             zIndex: '999999',
             border: '1px solid rgba(255,255,255,0.1)',
+            borderBottom: 'none',
             fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
+            boxShadow: '0 -8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            display: config.panelMinimized ? 'none' : 'flex',
-            overflow: 'visible'  // Allow info panel (positioned outside) to be visible
+            display: config.panelMinimized ? 'none' : 'block',
+            overflow: 'visible'
         });
         
-        // Add padding to main panel and make it scrollable
+        // No need to add extra padding to main panel as it's already in the HTML
         const mainPanel = panel.querySelector('#main-panel');
-        mainPanel.style.padding = '20px';
-        mainPanel.style.overflowY = 'auto';
-        mainPanel.style.maxHeight = 'calc(90vh - 40px)';  // Account for 20px padding top+bottom
 
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
-        icon.innerHTML = '<span style="font-weight:700; font-size:28px; background:linear-gradient(135deg, #007aff 0%, #34c759 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow:0 0 20px rgba(0,122,255,0.6);">KF</span>';
+        icon.innerHTML = '<span style="font-weight:700; font-size:20px;">⌨️</span>';
         icon.setAttribute('role', 'button');
         icon.setAttribute('aria-label', 'Paneli Aç');
         icon.setAttribute('tabindex', '0');
         Object.assign(icon.style, {
             position: 'fixed',
-            top: '50%',
-            right: '24px',
-            transform: 'translateY(-50%)',
-            width: '64px',
-            height: '64px',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '50px',
+            height: '50px',
             background: 'rgba(28, 28, 30, 0.95)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
             border: '2px solid rgba(0,122,255,0.4)',
-            borderRadius: '50%',
+            borderRadius: '12px',
             display: config.panelMinimized ? 'flex' : 'none',
             justifyContent: 'center',
             alignItems: 'center',
@@ -845,37 +869,28 @@
         document.body.appendChild(panel);
         document.body.appendChild(icon);
 
-        // Info panel toggle
-        const infoPanel = document.getElementById('info-panel');
+        // Settings panel toggle
+        const settingsPanel = document.getElementById('settings-panel');
         const mainPanelEl = document.getElementById('main-panel');
         
-        document.getElementById('btn-info').onclick = () => {
-            if (config.infoExpanded) {
-                // Close info panel - slide info out to the left, bring main back
-                infoPanel.style.transform = '';
-                infoPanel.style.opacity = '0';
-                infoPanel.style.pointerEvents = 'none';
-                mainPanelEl.style.transform = '';
-                config.infoExpanded = false;
+        document.getElementById('btn-settings').onclick = () => {
+            if (settingsPanel.style.opacity === '1') {
+                // Close settings panel
+                settingsPanel.style.opacity = '0';
+                settingsPanel.style.pointerEvents = 'none';
             } else {
-                // Open info panel - slide info in from left (100% to the right), slide main out to right
-                infoPanel.style.transform = 'translateX(100%)';
-                infoPanel.style.opacity = '1';
-                infoPanel.style.pointerEvents = 'auto';
-                mainPanelEl.style.transform = 'translateX(100%)';
-                config.infoExpanded = true;
+                // Open settings panel
+                settingsPanel.style.opacity = '1';
+                settingsPanel.style.pointerEvents = 'auto';
             }
         };
         
-        document.getElementById('btn-close-info').onclick = () => {
-            infoPanel.style.transform = '';
-            infoPanel.style.opacity = '0';
-            infoPanel.style.pointerEvents = 'none';
-            mainPanelEl.style.transform = '';
-            config.infoExpanded = false;
+        document.getElementById('btn-close-settings').onclick = () => {
+            settingsPanel.style.opacity = '0';
+            settingsPanel.style.pointerEvents = 'none';
         };
 
-        // Minimize/Maximize olayları
+        // Minimize/Maximize events
         document.getElementById('btn-minimize').onclick = () => {
             panel.style.display = 'none';
             icon.style.display = 'flex';
@@ -890,7 +905,7 @@
             localStorage.setItem('katip-panel-minimized', 'false');
         };
 
-        // Hover efektleri
+        // Hover effects
         const minimizeBtn = document.getElementById('btn-minimize');
         minimizeBtn.onmouseenter = () => {
             minimizeBtn.style.background = 'rgba(255,255,255,0.1)';
@@ -899,22 +914,22 @@
             minimizeBtn.style.background = 'transparent';
         };
         
-        const infoBtn = document.getElementById('btn-info');
-        infoBtn.onmouseenter = () => {
-            infoBtn.style.background = 'rgba(255,255,255,0.1)';
-            infoBtn.style.transform = 'scale(1.1)';
+        const settingsBtn = document.getElementById('btn-settings');
+        settingsBtn.onmouseenter = () => {
+            settingsBtn.style.background = 'rgba(255,255,255,0.1)';
+            settingsBtn.style.transform = 'scale(1.1)';
         };
-        infoBtn.onmouseleave = () => {
-            infoBtn.style.background = 'transparent';
-            infoBtn.style.transform = 'scale(1)';
+        settingsBtn.onmouseleave = () => {
+            settingsBtn.style.background = 'transparent';
+            settingsBtn.style.transform = 'scale(1)';
         };
 
         icon.onmouseenter = () => {
-            icon.style.transform = 'scale(1.15)';
+            icon.style.transform = 'translateX(-50%) scale(1.15)';
             icon.style.boxShadow = '0 0 40px rgba(0,122,255,0.7), 0 12px 32px rgba(0,0,0,0.4)';
         };
         icon.onmouseleave = () => {
-            icon.style.transform = 'scale(1)';
+            icon.style.transform = 'translateX(-50%) scale(1)';
             icon.style.boxShadow = '0 0 30px rgba(0,122,255,0.5), 0 8px 24px rgba(0,0,0,0.3)';
         };
 
@@ -1000,7 +1015,19 @@
             config.mistakeMode = this.value;
             localStorage.setItem('katip-mistake-mode', this.value);
             const controls = document.getElementById('mistake-controls');
+            const rateControl = document.getElementById('mistake-rate-control');
+            const chanceControl = document.getElementById('mistake-chance-control');
+            
             controls.style.display = this.value !== 'none' ? 'block' : 'none';
+            
+            if (this.value === 'basic' || this.value === 'advanced') {
+                rateControl.style.display = 'block';
+                chanceControl.style.display = 'none';
+            } else if (this.value === 'custom') {
+                rateControl.style.display = 'none';
+                chanceControl.style.display = 'block';
+            }
+            
             logger(`Hata modu: ${this.value}`);
         };
         
@@ -1015,6 +1042,21 @@
             localStorage.setItem('katip-mistake-rate', value);
         };
 
+        // Mistake chance input
+        const mistakeChanceInput = document.getElementById('mistake-chance-input');
+        const mistakeChanceDisplay = document.getElementById('mistake-chance-display');
+        mistakeChanceInput.oninput = function() {
+            let value = parseInt(this.value);
+            if (isNaN(value) || value < 0) value = 0;
+            if (value > 100) value = 100;
+            this.value = value;
+            config.mistakeChance = value;
+            localStorage.setItem('katip-mistake-chance', value);
+            if (mistakeChanceDisplay) {
+                mistakeChanceDisplay.innerText = value;
+            }
+        };
+
         // Slider stili
         const style = document.createElement('style');
         style.textContent = `
@@ -1026,6 +1068,17 @@
                 50% {
                     box-shadow: 0 0 50px rgba(0,122,255,0.8), 0 0 70px rgba(52,199,89,0.4), 0 8px 24px rgba(0,0,0,0.3);
                     border-color: rgba(52,199,89,0.6);
+                }
+            }
+            
+            @keyframes flash-red {
+                0%, 100% {
+                    color: #ff3b30;
+                    text-shadow: 0 0 10px rgba(255,59,48,0.8);
+                }
+                50% {
+                    color: #ff8080;
+                    text-shadow: 0 0 20px rgba(255,59,48,1);
                 }
             }
             
