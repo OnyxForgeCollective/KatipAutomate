@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v1
+// @version      v2.0
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -16,8 +16,18 @@
     // --- AYARLAR ---
     const config = {
         active: false,
-        delay: 120, // İki harf arası bekleme süresi (ms)
-        debug: true // Konsolda detaylı hata ayıklama görmek için true
+        delay: parseInt(localStorage.getItem('katip-speed')) || 120, // İki harf arası bekleme süresi (ms)
+        debug: true, // Konsolda detaylı hata ayıklama görmek için true
+        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true' // Panel başlangıç durumu
+    };
+
+    // --- İSTATİSTİKLER ---
+    const stats = {
+        startTime: null,
+        totalChars: 0,
+        totalWords: 0,
+        currentWPM: 0,
+        updateInterval: null
     };
 
     const logger = (msg, type = 'info') => {
@@ -29,6 +39,60 @@
     };
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // --- İSTATİSTİK FONKSİYONLARI ---
+    function updateStats(char) {
+        stats.totalChars++;
+        if (char === ' ' || char === '\n') {
+            stats.totalWords++;
+        }
+
+        if (stats.startTime) {
+            const elapsedMinutes = (Date.now() - stats.startTime) / 60000;
+            if (elapsedMinutes > 0) {
+                stats.currentWPM = Math.round(stats.totalWords / elapsedMinutes);
+            }
+        }
+    }
+
+    function startStatsTracking() {
+        stats.startTime = Date.now();
+        stats.totalChars = 0;
+        stats.totalWords = 0;
+        stats.currentWPM = 0;
+
+        // Her saniye istatistikleri güncelle
+        if (stats.updateInterval) clearInterval(stats.updateInterval);
+        stats.updateInterval = setInterval(updateStatsDisplay, 1000);
+    }
+
+    function stopStatsTracking() {
+        if (stats.updateInterval) {
+            clearInterval(stats.updateInterval);
+            stats.updateInterval = null;
+        }
+    }
+
+    function updateStatsDisplay() {
+        const wpmDisplay = document.getElementById('current-wpm');
+        const forecast1 = document.getElementById('forecast-1min');
+        const forecast3 = document.getElementById('forecast-3min');
+        const forecast5 = document.getElementById('forecast-5min');
+
+        if (wpmDisplay) {
+            wpmDisplay.innerText = stats.currentWPM || 0;
+        }
+
+        if (forecast1) {
+            forecast1.innerText = Math.round(stats.currentWPM * 1);
+        }
+        if (forecast3) {
+            forecast3.innerText = Math.round(stats.currentWPM * 3);
+        }
+        if (forecast5) {
+            forecast5.innerText = Math.round(stats.currentWPM * 5);
+        }
+    }
 
     // --- ELEMENT BULUCU (HTML Analizi) ---
     function findActiveElements() {
@@ -105,6 +169,9 @@
         // Input ve tuş bırakma eventleri
         element.dispatchEvent(new InputEvent('input', { data: key, bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', eventObj));
+
+        // İstatistikleri güncelle
+        updateStats(key);
     }
 
     // --- DÖNGÜ (DÜELLO & TEXTAREA) ---
@@ -210,6 +277,7 @@
         }
 
         config.active = true;
+        startStatsTracking();
         updatePanelUI(true);
 
         if (elements.type === 'textarea') {
@@ -223,6 +291,7 @@
 
     function stopBot() {
         config.active = false;
+        stopStatsTracking();
         updatePanelUI(false);
         logger('Bot durduruldu.');
     }
@@ -233,15 +302,15 @@
         const status = document.getElementById('bot-status');
         if (btn && status) {
             if (isRunning) {
-                btn.innerText = "DURDUR";
-                btn.style.background = "#500";
-                status.innerText = "ÇALIŞIYOR";
-                status.style.color = "#0f0";
+                btn.innerText = "⏸ Durdur";
+                btn.style.background = "linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%)";
+                status.innerText = "Aktif";
+                status.style.color = "#34c759";
             } else {
-                btn.innerText = "BAŞLAT";
-                btn.style.background = "#333";
-                status.innerText = "BEKLİYOR";
-                status.style.color = "orange";
+                btn.innerText = "▶ Başlat";
+                btn.style.background = "linear-gradient(135deg, #007aff 0%, #0051d5 100%)";
+                status.innerText = "Bekliyor";
+                status.style.color = "#ff9500";
             }
         }
     }
@@ -252,47 +321,203 @@
         const panel = document.createElement('div');
         panel.id = 'katip-v12-panel';
         panel.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #444; padding-bottom:5px;">
-                <span style="font-weight:bold; color:#00ffea;">KatiponlineFucker</span>
-                <span id="btn-minimize" style="cursor:pointer; color:#aaa;">_</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1);">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:8px; height:8px; border-radius:50%; background:#34c759; box-shadow:0 0 8px rgba(52,199,89,0.6);"></div>
+                    <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">KatipOnline</span>
+                </div>
+                <span id="btn-minimize" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px; hover:background:rgba(255,255,255,0.1);">−</span>
             </div>
-            <div style="font-size:10px; margin-bottom:8px; color:#aaa;">Durum: <span id="bot-status" style="color:orange;">BEKLİYOR</span></div>
-            <div style="margin-bottom:8px;">
-                <label style="font-size:10px; display:block; color:#aaa;">Hız: <span id="speed-val" style="color:#fff;">${config.delay}ms</span></label>
-                <input type="range" id="bot-slider" min="10" max="300" step="10" value="${config.delay}" style="width:100%; cursor:pointer;">
+            
+            <div style="margin-bottom:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Durum</span>
+                    <span id="bot-status" style="font-size:12px; color:#ff9500; font-weight:600;">Bekliyor</span>
+                </div>
             </div>
-            <button id="btn-main" style="width:100%; padding:5px; background:#333; color:#fff; border:1px solid #555; cursor:pointer; font-weight:bold; font-size:12px; border-radius:3px;">
-                BAŞLAT
+
+            <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.08);">
+                <div style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:8px; font-weight:500; text-transform:uppercase; letter-spacing:0.5px;">İstatistikler</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                    <div style="background:rgba(0,122,255,0.1); border-radius:8px; padding:8px; border:1px solid rgba(0,122,255,0.2);">
+                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Anlık Hız</div>
+                        <div style="font-size:16px; color:#007aff; font-weight:600;"><span id="current-wpm">0</span> <span style="font-size:10px;">WPM</span></div>
+                    </div>
+                    <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:8px; border:1px solid rgba(52,199,89,0.2);">
+                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">1 Dakika</div>
+                        <div style="font-size:16px; color:#34c759; font-weight:600;"><span id="forecast-1min">0</span> <span style="font-size:10px;">kelime</span></div>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:8px; border:1px solid rgba(255,149,0,0.2);">
+                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">3 Dakika</div>
+                        <div style="font-size:16px; color:#ff9500; font-weight:600;"><span id="forecast-3min">0</span> <span style="font-size:10px;">kelime</span></div>
+                    </div>
+                    <div style="background:rgba(255,59,48,0.1); border-radius:8px; padding:8px; border:1px solid rgba(255,59,48,0.2);">
+                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">5 Dakika</div>
+                        <div style="font-size:16px; color:#ff3b30; font-weight:600;"><span id="forecast-5min">0</span> <span style="font-size:10px;">kelime</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Yazma Hızı</label>
+                    <span id="speed-val" style="font-size:12px; color:#ffffff; font-weight:600; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:6px;">${config.delay}ms</span>
+                </div>
+                <input type="range" id="bot-slider" min="10" max="300" step="10" value="${config.delay}" 
+                    style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
+                    background:rgba(255,255,255,0.1); cursor:pointer;">
+                <div style="display:flex; justify-content:space-between; margin-top:4px;">
+                    <span style="font-size:9px; color:rgba(255,255,255,0.4);">Hızlı</span>
+                    <span style="font-size:9px; color:rgba(255,255,255,0.4);">Yavaş</span>
+                </div>
+            </div>
+
+            <button id="btn-main" 
+                style="width:100%; padding:12px; background:linear-gradient(135deg, #007aff 0%, #0051d5 100%); 
+                color:#fff; border:none; cursor:pointer; font-weight:600; font-size:13px; 
+                border-radius:10px; transition:all 0.3s; box-shadow:0 4px 12px rgba(0,122,255,0.3); 
+                letter-spacing:0.3px;">
+                ▶ Başlat
             </button>
         `;
 
         Object.assign(panel.style, {
-            position: 'fixed', bottom: '20px', right: '20px', width: '200px',
-            background: 'rgba(10, 10, 10, 0.95)', color: 'white', padding: '15px',
-            borderRadius: '8px', zIndex: '999999', border: `1px solid #00ffea`,
-            fontFamily: 'Segoe UI, sans-serif', boxShadow: '0 0 15px rgba(0,0,0,0.6)'
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            width: '280px',
+            background: 'rgba(28, 28, 30, 0.95)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            color: 'white',
+            padding: '20px',
+            borderRadius: '16px',
+            zIndex: '999999',
+            border: '1px solid rgba(255,255,255,0.1)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            display: config.panelMinimized ? 'none' : 'block'
         });
 
         const icon = document.createElement('div');
-        icon.innerText = 'K';
+        icon.id = 'katip-icon';
+        icon.innerHTML = '<span style="font-size:18px;">⌨️</span>';
         Object.assign(icon.style, {
-            position: 'fixed', bottom: '20px', right: '20px', width: '40px', height: '40px',
-            background: '#222', color: '#00ffea', border: '2px solid #00ffea',
-            borderRadius: '50%', display: 'none', justifyContent: 'center', alignItems: 'center',
-            cursor: 'pointer', zIndex: '999999', fontWeight: 'bold', fontSize: '20px'
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            width: '56px',
+            height: '56px',
+            background: 'rgba(28, 28, 30, 0.95)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            color: '#007aff',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '50%',
+            display: config.panelMinimized ? 'flex' : 'none',
+            justifyContent: 'center',
+            alignItems: 'center',
+            cursor: 'pointer',
+            zIndex: '999999',
+            fontWeight: 'bold',
+            fontSize: '20px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         });
 
         document.body.appendChild(panel);
         document.body.appendChild(icon);
 
-        document.getElementById('btn-minimize').onclick = () => { panel.style.display = 'none'; icon.style.display = 'flex'; };
-        icon.onclick = () => { icon.style.display = 'none'; panel.style.display = 'block'; };
-
-        document.getElementById('bot-slider').oninput = function() {
-            config.delay = parseInt(this.value);
-            document.getElementById('speed-val').innerText = this.value + "ms";
+        // Minimize/Maximize olayları
+        document.getElementById('btn-minimize').onclick = () => {
+            panel.style.display = 'none';
+            icon.style.display = 'flex';
+            config.panelMinimized = true;
+            localStorage.setItem('katip-panel-minimized', 'true');
         };
 
+        icon.onclick = () => {
+            icon.style.display = 'none';
+            panel.style.display = 'block';
+            config.panelMinimized = false;
+            localStorage.setItem('katip-panel-minimized', 'false');
+        };
+
+        // Hover efektleri
+        const minimizeBtn = document.getElementById('btn-minimize');
+        minimizeBtn.onmouseenter = () => {
+            minimizeBtn.style.background = 'rgba(255,255,255,0.1)';
+        };
+        minimizeBtn.onmouseleave = () => {
+            minimizeBtn.style.background = 'transparent';
+        };
+
+        icon.onmouseenter = () => {
+            icon.style.transform = 'scale(1.1)';
+            icon.style.boxShadow = '0 12px 32px rgba(0,0,0,0.4)';
+        };
+        icon.onmouseleave = () => {
+            icon.style.transform = 'scale(1)';
+            icon.style.boxShadow = '0 8px 24px rgba(0,0,0,0.3)';
+        };
+
+        const mainBtn = document.getElementById('btn-main');
+        mainBtn.onmouseenter = () => {
+            mainBtn.style.transform = 'translateY(-2px)';
+            mainBtn.style.boxShadow = '0 6px 16px rgba(0,122,255,0.4)';
+        };
+        mainBtn.onmouseleave = () => {
+            mainBtn.style.transform = 'translateY(0)';
+            mainBtn.style.boxShadow = '0 4px 12px rgba(0,122,255,0.3)';
+        };
+
+        // Slider olayı
+        const slider = document.getElementById('bot-slider');
+        slider.oninput = function() {
+            config.delay = parseInt(this.value);
+            document.getElementById('speed-val').innerText = this.value + "ms";
+            localStorage.setItem('katip-speed', this.value);
+        };
+
+        // Slider stili
+        const style = document.createElement('style');
+        style.textContent = `
+            #bot-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #007aff;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(0,122,255,0.4);
+                transition: all 0.2s;
+            }
+            #bot-slider::-webkit-slider-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 12px rgba(0,122,255,0.6);
+            }
+            #bot-slider::-moz-range-thumb {
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #007aff;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 2px 8px rgba(0,122,255,0.4);
+                transition: all 0.2s;
+            }
+            #bot-slider::-moz-range-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 12px rgba(0,122,255,0.6);
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Ana buton olayı
         document.getElementById('btn-main').onclick = () => {
             if (config.active) stopBot();
             else startBot();
