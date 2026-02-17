@@ -85,6 +85,10 @@
 
     // --- YENİ FONKSİYON: ANLIK TAHMİN ---
     function calculateEstimatedWPM() {
+        // Validate delay to prevent division by zero
+        if (!config.delay || config.delay < 1) {
+            return 0;
+        }
         // Ortalama kelime uzunluğu (İngilizce için ~5, Türkçe için ~6)
         const avgWordLength = 6;
         // Kelime arası boşluk
@@ -463,6 +467,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
                         <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hedef Kelime Sayısı</span>
                         <input type="number" id="word-limit-input" min="10" max="1500" value="${config.wordLimit}"
+                            aria-label="Hedef kelime sayısı"
                             style="width:70px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
                             border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
                     </div>
@@ -486,6 +491,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
                     <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Yazma Hızı</label>
                     <input type="number" id="speed-input" min="1" max="300" value="${config.delay}"
+                        aria-label="Yazma hızı (milisaniye)"
                         style="width:70px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
                         border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
                 </div>
