@@ -33,8 +33,15 @@ Basitçe anlatmak gerekirse:
 ## ✨ Özellikler
 
 - ⚡ **Ayarlanabilir Hız**: Yazma hızını 10ms ile 300ms arasında ayarlayabilirsiniz
-- 📊 **Gerçek Zamanlı İstatistikler**: Anlık yazma hızınızı ve gelecek tahminlerini görün
-- 🎨 **Apple Tasarımı**: Modern, minimal ve şık bir arayüz
+- 🎨 **3 Farklı Görünüm Modu**: 
+  - **Taskbar Modu**: Kompakt, merkezde, hızlı erişim için
+  - **Tam Mod**: Geniş, detaylı ayarlar ve istatistikler
+  - **Simge Modu**: Minimal, sadece KF simgesi
+- 📊 **Gerçek Zamanlı İstatistikler**: Anlık yazma hızınızı ve gelecek tahminlerini görün (Tam Modda)
+- 🎯 **Taskbar Hız Kaydırıcısı**: Ayarlara girmeden hızı anında değiştirin
+- ✨ **Akıcı Animasyonlar**: Modern, yumuşak geçiş efektleri
+- 🌈 **Gökkuşağı Efekti**: Minimize edildiğinde göz alıcı ışıltılı simge
+- 🍎 **Apple Tasarımı**: Modern, minimal ve şık bir arayüz
 - 💾 **Otomatik Kayıt**: Ayarlarınız otomatik olarak kaydedilir ve yüklenir
 - 🔄 **Çoklu Mod Desteği**: 
   - Düello Modu
@@ -42,7 +49,7 @@ Basitçe anlatmak gerekirse:
   - Kelime Çalışması
   - Hız Testi
 - 🎯 **Akıllı Element Algılama**: Hangi sayfada olursanız olun, doğru yazı alanını bulur
-- 📱 **Gizlenebilir Panel**: İhtiyacınız olmadığında paneli küçültebilirsiniz
+- 📱 **Gizlenebilir Panel**: İhtiyacınız olmadığında paneli tamamen küçültebilirsiniz
 
 ---
 
@@ -121,10 +128,40 @@ Bu script'i kullanabilmek için öncelikle bir **userscript yöneticisi** eklent
 - İstediğiniz zaman **"⏸ Durdur"** butonuna tıklayabilirsiniz
 - Bot hemen duracak
 
-#### 7. Paneli Gizleme
-- Panel başlığındaki **"−"** işaretine tıklayın
-- Panel küçülecek, sadece **⌨️** emojisi görünecek
-- Tekrar açmak için emoji ikonuna tıklayın
+#### 7. Panel Modları
+
+KatiponlineFucker artık **3 farklı görünüm moduna** sahip:
+
+**🎯 Taskbar Modu (Varsayılan)**
+- Panel ekranın altında ortalanmış olarak görünür
+- Kompakt tasarım ile daha az yer kaplar
+- Hız kaydırıcısı doğrudan taskbar'da
+- İstatistikler gizli (temiz görünüm)
+- 💡 **İpucu:** Hızlı hız ayarlamaları için idealdir
+
+**📊 Tam Mod (Ayarlar Açık)**
+- ⚙️ Ayarlar butonuna tıklayarak açılır
+- Panel tam genişliğe (kenarlara kadar) yayılır
+- Tüm istatistikler görünür
+- Detaylı ayarlar paneli yukarıdan aşağı kayar
+- 💡 **İpucu:** Detaylı yapılandırma ve izleme için
+
+**🔘 Simge Modu (Minimize)**
+- **"−"** işaretine tıklayın
+- Panel tamamen gizlenir
+- Sadece **"KF"** yazılı, gökkuşağı ışıltılı simge görünür
+- Tekrar açmak için simgeye tıklayın
+- 💡 **İpucu:** Maksimum ekran alanı için
+
+**Mod Değiştirme:**
+- ⚙️ butonuna basarak Taskbar ⇄ Tam Mod arasında geçiş yapın
+- − butonuna basarak herhangi bir moddan Simge Moduna geçin
+- Simgeye tıklayarak Taskbar Moduna dönün
+
+**Hız Ayarlama:**
+- **Taskbar Modunda:** Paneldeki ⚡ Hız kaydırıcısını kullanın
+- **Tam Modda:** Ayarlar panelindeki detaylı kaydırıcıyı kullanın
+- Her iki kaydırıcı da senkronize çalışır, birini değiştirdiğinizde diğeri de güncellenir
 
 ---
 

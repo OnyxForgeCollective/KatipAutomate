@@ -690,7 +690,7 @@
         const panel = document.createElement('div');
         panel.id = 'katip-v12-panel';
         panel.innerHTML = `
-            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
+            <div id="main-panel" style="transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
                 <!-- Left: Status and Controls -->
                 <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -710,8 +710,17 @@
                     </button>
                 </div>
 
+                <!-- Taskbar Speed Slider (visible when settings closed) -->
+                <div id="taskbar-speed-slider" style="display:none; align-items:center; gap:8px; padding:6px 12px; background:rgba(255,255,255,0.05); border-radius:8px; border:1px solid rgba(255,255,255,0.08); min-width:200px;">
+                    <span style="font-size:11px; color:rgba(255,255,255,0.6); font-weight:500; white-space:nowrap;">⚡ Hız:</span>
+                    <input type="range" id="taskbar-slider" min="1" max="300" step="1" value="${config.delay}" 
+                        style="flex:1; height:4px; border-radius:2px; outline:none; -webkit-appearance:none; 
+                        background:rgba(255,255,255,0.1); cursor:pointer;">
+                    <span id="taskbar-speed-value" style="font-size:11px; color:#007aff; font-weight:600; min-width:40px; text-align:right;">${config.delay}ms</span>
+                </div>
+
                 <!-- Center: Stats (Horizontal) -->
-                <div style="display: flex; gap: 10px; flex: 1; overflow-x: auto;">
+                <div id="stats-container" style="display: flex; gap: 10px; flex: 1; overflow-x: auto;">
                     <!-- WPM Stats -->
                     <div id="wpm-calc-box" style="background:linear-gradient(135deg, rgba(0,122,255,0.15) 0%, rgba(0,122,255,0.05) 100%); border-radius:8px; padding:8px 12px; border:1px solid rgba(0,122,255,0.3); min-width: 140px;">
                         <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">📈 Ortalama yazım hızı</div>
@@ -894,22 +903,23 @@
         Object.assign(panel.style, {
             position: 'fixed',
             bottom: '0',
-            left: '0',
-            right: '0',
-            width: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'auto',
+            maxWidth: '95%',
             height: 'auto',
             background: 'rgba(28, 28, 30, 0.95)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
             color: 'white',
-            padding: '12px 0',
+            padding: '10px 0',
             borderRadius: '12px 12px 0 0',
             zIndex: '999999',
             border: '1px solid rgba(255,255,255,0.1)',
             borderBottom: 'none',
             fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
             boxShadow: '0 -8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
             display: config.panelMinimized ? 'none' : 'block',
             overflow: 'visible'
         });
@@ -965,17 +975,46 @@
             }
         }
         
+        function toggleTaskbarMode(isSettingsOpen) {
+            const taskbarSlider = document.getElementById('taskbar-speed-slider');
+            const statsContainer = document.getElementById('stats-container');
+            
+            if (isSettingsOpen) {
+                // Settings open - Full width mode
+                panel.style.left = '0';
+                panel.style.right = '0';
+                panel.style.transform = 'none';
+                panel.style.width = '100%';
+                panel.style.maxWidth = '100%';
+                mainPanelEl.style.padding = '0 16px';
+                taskbarSlider.style.display = 'none';
+                statsContainer.style.display = 'flex';
+            } else {
+                // Settings closed - Taskbar mode (centered, compact)
+                panel.style.left = '50%';
+                panel.style.right = 'auto';
+                panel.style.transform = 'translateX(-50%)';
+                panel.style.width = 'auto';
+                panel.style.maxWidth = '95%';
+                mainPanelEl.style.padding = '0 12px';
+                taskbarSlider.style.display = 'flex';
+                statsContainer.style.display = 'none';
+            }
+        }
+        
         document.getElementById('btn-settings').onclick = () => {
             if (settingsPanel.style.opacity === '1') {
-                // Close settings panel
+                // Close settings panel - switch to taskbar mode
                 settingsPanel.style.opacity = '0';
                 settingsPanel.style.pointerEvents = 'none';
                 panel.style.borderRadius = '12px 12px 0 0';
+                toggleTaskbarMode(false);
             } else {
-                // Open settings panel - remove rounded corners from main panel
+                // Open settings panel - switch to full width mode
                 settingsPanel.style.opacity = '1';
                 settingsPanel.style.pointerEvents = 'auto';
                 panel.style.borderRadius = '0';
+                toggleTaskbarMode(true);
             }
             setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
@@ -984,6 +1023,7 @@
             settingsPanel.style.opacity = '0';
             settingsPanel.style.pointerEvents = 'none';
             panel.style.borderRadius = '12px 12px 0 0';
+            toggleTaskbarMode(false);
             setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
         
@@ -1006,6 +1046,8 @@
         // Update padding when panel is first shown
         if (!config.panelMinimized) {
             setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
+            // Initialize in taskbar mode (settings closed by default)
+            toggleTaskbarMode(false);
         }
 
         // Hover effects
@@ -1050,6 +1092,14 @@
         const slider = document.getElementById('bot-slider');
         const speedInput = document.getElementById('speed-input');
         
+        // Helper function to sync taskbar slider
+        function syncTaskbarSlider(value) {
+            const taskbarSlider = document.getElementById('taskbar-slider');
+            const taskbarSpeedValue = document.getElementById('taskbar-speed-value');
+            if (taskbarSlider) taskbarSlider.value = value;
+            if (taskbarSpeedValue) taskbarSpeedValue.textContent = value + 'ms';
+        }
+        
         slider.oninput = function() {
             config.delay = parseInt(this.value);
             speedInput.value = this.value;
@@ -1057,6 +1107,8 @@
             // Anlık tahmini güncelle
             stats.estimatedWPM = calculateEstimatedWPM();
             updateStatsDisplay();
+            // Sync taskbar slider
+            syncTaskbarSlider(this.value);
         };
         
         speedInput.oninput = function() {
@@ -1067,6 +1119,23 @@
             config.delay = value;
             slider.value = value;
             localStorage.setItem('katip-speed', value);
+            // Anlık tahmini güncelle
+            stats.estimatedWPM = calculateEstimatedWPM();
+            updateStatsDisplay();
+            // Sync taskbar slider
+            syncTaskbarSlider(value);
+        };
+
+        // Taskbar slider event
+        const taskbarSlider = document.getElementById('taskbar-slider');
+        const taskbarSpeedValue = document.getElementById('taskbar-speed-value');
+        
+        taskbarSlider.oninput = function() {
+            config.delay = parseInt(this.value);
+            taskbarSpeedValue.textContent = this.value + 'ms';
+            slider.value = this.value;
+            speedInput.value = this.value;
+            localStorage.setItem('katip-speed', this.value);
             // Anlık tahmini güncelle
             stats.estimatedWPM = calculateEstimatedWPM();
             updateStatsDisplay();
@@ -1340,6 +1409,35 @@
             #bot-slider::-moz-range-thumb:hover {
                 transform: scale(1.2);
                 box-shadow: 0 4px 12px rgba(0,122,255,0.6);
+            }
+            #taskbar-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 14px;
+                height: 14px;
+                border-radius: 50%;
+                background: #007aff;
+                cursor: pointer;
+                box-shadow: 0 2px 6px rgba(0,122,255,0.4);
+                transition: all 0.2s;
+            }
+            #taskbar-slider::-webkit-slider-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 10px rgba(0,122,255,0.6);
+            }
+            #taskbar-slider::-moz-range-thumb {
+                width: 14px;
+                height: 14px;
+                border-radius: 50%;
+                background: #007aff;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 2px 6px rgba(0,122,255,0.4);
+                transition: all 0.2s;
+            }
+            #taskbar-slider::-moz-range-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 10px rgba(0,122,255,0.6);
             }
             #word-limit-slider::-webkit-slider-thumb {
                 -webkit-appearance: none;
