@@ -982,6 +982,7 @@
             if (isSettingsOpen) {
                 // Settings open - Full width mode
                 panel.style.left = '0';
+                panel.style.right = '0';
                 panel.style.transform = 'none';
                 panel.style.width = '100%';
                 panel.style.maxWidth = '100%';
@@ -991,6 +992,7 @@
             } else {
                 // Settings closed - Taskbar mode (centered, compact)
                 panel.style.left = '50%';
+                panel.style.right = 'auto';
                 panel.style.transform = 'translateX(-50%)';
                 panel.style.width = 'auto';
                 panel.style.maxWidth = '95%';
@@ -1090,6 +1092,14 @@
         const slider = document.getElementById('bot-slider');
         const speedInput = document.getElementById('speed-input');
         
+        // Helper function to sync taskbar slider
+        function syncTaskbarSlider(value) {
+            const taskbarSlider = document.getElementById('taskbar-slider');
+            const taskbarSpeedValue = document.getElementById('taskbar-speed-value');
+            if (taskbarSlider) taskbarSlider.value = value;
+            if (taskbarSpeedValue) taskbarSpeedValue.textContent = value + 'ms';
+        }
+        
         slider.oninput = function() {
             config.delay = parseInt(this.value);
             speedInput.value = this.value;
@@ -1098,10 +1108,7 @@
             stats.estimatedWPM = calculateEstimatedWPM();
             updateStatsDisplay();
             // Sync taskbar slider
-            const taskbarSlider = document.getElementById('taskbar-slider');
-            const taskbarSpeedValue = document.getElementById('taskbar-speed-value');
-            if (taskbarSlider) taskbarSlider.value = this.value;
-            if (taskbarSpeedValue) taskbarSpeedValue.textContent = this.value + 'ms';
+            syncTaskbarSlider(this.value);
         };
         
         speedInput.oninput = function() {
@@ -1116,10 +1123,7 @@
             stats.estimatedWPM = calculateEstimatedWPM();
             updateStatsDisplay();
             // Sync taskbar slider
-            const taskbarSlider = document.getElementById('taskbar-slider');
-            const taskbarSpeedValue = document.getElementById('taskbar-speed-value');
-            if (taskbarSlider) taskbarSlider.value = value;
-            if (taskbarSpeedValue) taskbarSpeedValue.textContent = value + 'ms';
+            syncTaskbarSlider(value);
         };
 
         // Taskbar slider event
