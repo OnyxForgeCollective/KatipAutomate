@@ -755,7 +755,7 @@
                 </button>
             </div>
             
-            <div id="info-panel" style="position:absolute; top:0; right:100%; width:280px; height:100%; background:rgba(28, 28, 30, 0.98); border-radius:16px; padding:20px; overflow-y:auto; transform:translateX(-10px); opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1);">
+            <div id="info-panel" style="position:absolute; top:0; right:100%; width:280px; height:100%; background:rgba(28, 28, 30, 0.98); border-radius:16px; padding:20px; overflow-y:auto; opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1);">
                     <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">ℹ️ Bilgi</span>
                     <span id="btn-close-info" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">×</span>
@@ -851,15 +851,15 @@
         
         document.getElementById('btn-info').onclick = () => {
             if (config.infoExpanded) {
-                // Close info panel - main panel slides back to center
-                infoPanel.style.transform = 'translateX(-10px)';
+                // Close info panel - slide info out to the left, bring main back
+                infoPanel.style.transform = '';
                 infoPanel.style.opacity = '0';
                 infoPanel.style.pointerEvents = 'none';
-                mainPanelEl.style.transform = 'translateX(0)';
+                mainPanelEl.style.transform = '';
                 config.infoExpanded = false;
             } else {
-                // Open info panel - main panel slides right, info panel slides in from left
-                infoPanel.style.transform = 'translateX(0)';
+                // Open info panel - slide info in from left (100% to the right), slide main out to right
+                infoPanel.style.transform = 'translateX(100%)';
                 infoPanel.style.opacity = '1';
                 infoPanel.style.pointerEvents = 'auto';
                 mainPanelEl.style.transform = 'translateX(100%)';
@@ -868,10 +868,10 @@
         };
         
         document.getElementById('btn-close-info').onclick = () => {
-            infoPanel.style.transform = 'translateX(-10px)';
+            infoPanel.style.transform = '';
             infoPanel.style.opacity = '0';
             infoPanel.style.pointerEvents = 'none';
-            mainPanelEl.style.transform = 'translateX(0)';
+            mainPanelEl.style.transform = '';
             config.infoExpanded = false;
         };
 
