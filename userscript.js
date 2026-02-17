@@ -29,7 +29,7 @@
         mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 50, // Hata yapma şansı (%)
         mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 1, // Hatadan sonra kaç kere silme
         mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70, // Temizleme ihtimali (%)
-        mistakeRewriteCorrect: localStorage.getItem('katip-mistake-rewrite') === 'true' || true, // Hatadan sonra doğru kelimeyi yazma
+        mistakeRewriteCorrect: localStorage.getItem('katip-mistake-rewrite') !== 'false', // Hatadan sonra doğru kelimeyi yazma (default: true)
         humanLikeTyping: localStorage.getItem('katip-human-like') === 'true' // İnsan gibi yazma modu
     };
 
@@ -710,7 +710,7 @@
         const panel = document.createElement('div');
         panel.id = 'katip-v12-panel';
         panel.innerHTML = `
-            <div id="main-panel" style="transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
+            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
                 <!-- Left: Status and Controls -->
                 <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -993,6 +993,8 @@
         };
 
         // Minimize/Maximize events
+        const PANEL_ANIMATION_DELAY = 100; // ms delay for panel height calculation
+        
         function updateBodyPadding() {
             if (!config.panelMinimized && panel.style.display !== 'none') {
                 const panelHeight = panel.offsetHeight;
@@ -1016,26 +1018,24 @@
             panel.style.display = 'block';
             config.panelMinimized = false;
             localStorage.setItem('katip-panel-minimized', 'false');
-            setTimeout(updateBodyPadding, 100);
+            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
         };
         
         // Update padding when panel is first shown
         if (!config.panelMinimized) {
-            setTimeout(updateBodyPadding, 100);
+            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
         }
         
-        // Update padding when settings panel opens/closes
-        const originalSettingsClick = document.getElementById('btn-settings').onclick;
-        document.getElementById('btn-settings').onclick = function() {
-            originalSettingsClick.call(this);
-            setTimeout(updateBodyPadding, 100);
-        };
+        // Enhance settings toggle to update padding
+        const settingsBtnOriginal = document.getElementById('btn-settings');
+        settingsBtnOriginal.addEventListener('click', () => {
+            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
+        });
         
-        const originalCloseClick = document.getElementById('btn-close-settings').onclick;
-        document.getElementById('btn-close-settings').onclick = function() {
-            originalCloseClick.call(this);
-            setTimeout(updateBodyPadding, 100);
-        };
+        const closeBtnOriginal = document.getElementById('btn-close-settings');
+        closeBtnOriginal.addEventListener('click', () => {
+            setTimeout(updateBodyPadding, PANEL_ANIMATION_DELAY);
+        });
 
         // Hover effects
         const minimizeBtn = document.getElementById('btn-minimize');
