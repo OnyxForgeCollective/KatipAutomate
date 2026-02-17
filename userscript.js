@@ -29,6 +29,7 @@
         totalChars: 0,
         totalWords: 0,
         currentWPM: 0,
+        estimatedWPM: 0,
         updateInterval: null
     };
 
@@ -74,11 +75,29 @@
         stats.totalChars = 0;
         stats.totalWords = 0;
         stats.currentWPM = 0;
+        stats.estimatedWPM = calculateEstimatedWPM();
         lastCharWasSpace = true; // Reset word boundary tracking
 
         // Her saniye istatistikleri güncelle
         if (stats.updateInterval) clearInterval(stats.updateInterval);
         stats.updateInterval = setInterval(updateStatsDisplay, 1000);
+    }
+
+    // --- YENİ FONKSİYON: ANLIK TAHMİN ---
+    function calculateEstimatedWPM() {
+        // Ortalama kelime uzunluğu (İngilizce için ~5, Türkçe için ~6)
+        const avgWordLength = 6;
+        // Kelime arası boşluk
+        const spaceChar = 1;
+        // Ortalama kelime karakter sayısı (harf + boşluk)
+        const avgCharsPerWord = avgWordLength + spaceChar;
+        // Dakikadaki milisaniye
+        const msPerMinute = 60000;
+        // config.delay ms'de bir karakter yazılıyor
+        const charsPerMinute = msPerMinute / config.delay;
+        // Dakikadaki kelime sayısı
+        const wordsPerMinute = Math.round(charsPerMinute / avgCharsPerWord);
+        return wordsPerMinute;
     }
 
     function stopStatsTracking() {
@@ -89,25 +108,46 @@
     }
 
     function updateStatsDisplay() {
-        const wpmDisplay = document.getElementById('current-wpm');
-        const forecast1 = document.getElementById('forecast-1min');
-        const forecast3 = document.getElementById('forecast-3min');
-        const forecast5 = document.getElementById('forecast-5min');
+        const wpmCalculated = document.getElementById('wpm-calculated');
+        const wpmEstimated = document.getElementById('wpm-estimated');
+        const forecast1Calc = document.getElementById('forecast-1min-calc');
+        const forecast3Calc = document.getElementById('forecast-3min-calc');
+        const forecast5Calc = document.getElementById('forecast-5min-calc');
+        const forecast1Est = document.getElementById('forecast-1min-est');
+        const forecast3Est = document.getElementById('forecast-3min-est');
+        const forecast5Est = document.getElementById('forecast-5min-est');
         const wordsWritten = document.getElementById('words-written');
         const wordsRemaining = document.getElementById('words-remaining');
 
-        if (wpmDisplay) {
-            wpmDisplay.innerText = stats.currentWPM || 0;
+        // Güncelleme sırasında tahmini yeniden hesapla
+        stats.estimatedWPM = calculateEstimatedWPM();
+
+        if (wpmCalculated) {
+            wpmCalculated.innerText = stats.currentWPM || 0;
+        }
+        
+        if (wpmEstimated) {
+            wpmEstimated.innerText = stats.estimatedWPM || 0;
         }
 
-        if (forecast1) {
-            forecast1.innerText = stats.currentWPM;
+        if (forecast1Calc) {
+            forecast1Calc.innerText = stats.currentWPM;
         }
-        if (forecast3) {
-            forecast3.innerText = Math.round(stats.currentWPM * 3);
+        if (forecast3Calc) {
+            forecast3Calc.innerText = Math.round(stats.currentWPM * 3);
         }
-        if (forecast5) {
-            forecast5.innerText = Math.round(stats.currentWPM * 5);
+        if (forecast5Calc) {
+            forecast5Calc.innerText = Math.round(stats.currentWPM * 5);
+        }
+
+        if (forecast1Est) {
+            forecast1Est.innerText = stats.estimatedWPM;
+        }
+        if (forecast3Est) {
+            forecast3Est.innerText = Math.round(stats.estimatedWPM * 3);
+        }
+        if (forecast5Est) {
+            forecast5Est.innerText = Math.round(stats.estimatedWPM * 5);
         }
         
         if (wordsWritten) {
@@ -370,22 +410,42 @@
                 <div style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:8px; font-weight:500; text-transform:uppercase; letter-spacing:0.5px;">İstatistikler</div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
                     <div style="background:rgba(0,122,255,0.1); border-radius:8px; padding:8px; border:1px solid rgba(0,122,255,0.2);">
-                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">Anlık Hız</div>
-                        <div style="font-size:16px; color:#007aff; font-weight:600;"><span id="current-wpm">0</span> <span style="font-size:10px;">WPM</span></div>
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">Calculated</div>
+                        <div style="font-size:16px; color:#007aff; font-weight:600;"><span id="wpm-calculated">0</span> <span style="font-size:10px;">WPM</span></div>
                     </div>
                     <div style="background:rgba(52,199,89,0.1); border-radius:8px; padding:8px; border:1px solid rgba(52,199,89,0.2);">
-                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">1 Dakika</div>
-                        <div style="font-size:16px; color:#34c759; font-weight:600;"><span id="forecast-1min">0</span> <span style="font-size:10px;">kelime</span></div>
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:2px;">Estimated</div>
+                        <div style="font-size:16px; color:#34c759; font-weight:600;"><span id="wpm-estimated">0</span> <span style="font-size:10px;">WPM</span></div>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                    <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:8px; border:1px solid rgba(255,149,0,0.2);">
-                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">3 Dakika</div>
-                        <div style="font-size:16px; color:#ff9500; font-weight:600;"><span id="forecast-3min">0</span> <span style="font-size:10px;">kelime</span></div>
+                <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-bottom:4px; font-weight:500;">Calculated Forecast</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px;">
+                    <div style="background:rgba(0,122,255,0.08); border-radius:6px; padding:6px; border:1px solid rgba(0,122,255,0.15);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:1px;">1 dk</div>
+                        <div style="font-size:13px; color:#007aff; font-weight:600;"><span id="forecast-1min-calc">0</span></div>
                     </div>
-                    <div style="background:rgba(255,59,48,0.1); border-radius:8px; padding:8px; border:1px solid rgba(255,59,48,0.2);">
-                        <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-bottom:2px;">5 Dakika</div>
-                        <div style="font-size:16px; color:#ff3b30; font-weight:600;"><span id="forecast-5min">0</span> <span style="font-size:10px;">kelime</span></div>
+                    <div style="background:rgba(0,122,255,0.08); border-radius:6px; padding:6px; border:1px solid rgba(0,122,255,0.15);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:1px;">3 dk</div>
+                        <div style="font-size:13px; color:#007aff; font-weight:600;"><span id="forecast-3min-calc">0</span></div>
+                    </div>
+                    <div style="background:rgba(0,122,255,0.08); border-radius:6px; padding:6px; border:1px solid rgba(0,122,255,0.15);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:1px;">5 dk</div>
+                        <div style="font-size:13px; color:#007aff; font-weight:600;"><span id="forecast-5min-calc">0</span></div>
+                    </div>
+                </div>
+                <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-bottom:4px; font-weight:500;">Estimated Forecast</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
+                    <div style="background:rgba(52,199,89,0.08); border-radius:6px; padding:6px; border:1px solid rgba(52,199,89,0.15);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:1px;">1 dk</div>
+                        <div style="font-size:13px; color:#34c759; font-weight:600;"><span id="forecast-1min-est">0</span></div>
+                    </div>
+                    <div style="background:rgba(52,199,89,0.08); border-radius:6px; padding:6px; border:1px solid rgba(52,199,89,0.15);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:1px;">3 dk</div>
+                        <div style="font-size:13px; color:#34c759; font-weight:600;"><span id="forecast-3min-est">0</span></div>
+                    </div>
+                    <div style="background:rgba(52,199,89,0.08); border-radius:6px; padding:6px; border:1px solid rgba(52,199,89,0.15);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.4); margin-bottom:1px;">5 dk</div>
+                        <div style="font-size:13px; color:#34c759; font-weight:600;"><span id="forecast-5min-est">0</span></div>
                     </div>
                 </div>
             </div>
@@ -400,11 +460,13 @@
                     </label>
                 </div>
                 <div id="word-limit-controls" style="display:${config.wordLimitEnabled ? 'block' : 'none'};">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
                         <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hedef Kelime Sayısı</span>
-                        <span id="word-limit-val" style="font-size:12px; color:#ffffff; font-weight:600; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:6px;">${config.wordLimit} kelime</span>
+                        <input type="number" id="word-limit-input" min="10" max="1500" value="${config.wordLimit}"
+                            style="width:70px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                            border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
                     </div>
-                    <input type="range" id="word-limit-slider" min="10" max="500" step="10" value="${config.wordLimit}" 
+                    <input type="range" id="word-limit-slider" min="10" max="1500" step="10" value="${config.wordLimit}" 
                         style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
                         background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:8px;">
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
@@ -421,16 +483,18 @@
             </div>
 
             <div style="margin-bottom:16px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
                     <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">Yazma Hızı</label>
-                    <span id="speed-val" style="font-size:12px; color:#ffffff; font-weight:600; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:6px;">${config.delay}ms</span>
+                    <input type="number" id="speed-input" min="1" max="300" value="${config.delay}"
+                        style="width:70px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                        border-radius:6px; color:#ffffff; font-size:12px; font-weight:600; text-align:center;">
                 </div>
-                <input type="range" id="bot-slider" min="10" max="300" step="10" value="${config.delay}" 
+                <input type="range" id="bot-slider" min="1" max="300" step="1" value="${config.delay}" 
                     style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
                     background:rgba(255,255,255,0.1); cursor:pointer;">
                 <div style="display:flex; justify-content:space-between; margin-top:4px;">
-                    <span style="font-size:9px; color:rgba(255,255,255,0.4);">Hızlı</span>
-                    <span style="font-size:9px; color:rgba(255,255,255,0.4);">Yavaş</span>
+                    <span style="font-size:9px; color:rgba(255,255,255,0.4);">Hızlı (1ms)</span>
+                    <span style="font-size:9px; color:rgba(255,255,255,0.4);">Yavaş (300ms)</span>
                 </div>
             </div>
 
@@ -539,10 +603,28 @@
 
         // Slider olayı
         const slider = document.getElementById('bot-slider');
+        const speedInput = document.getElementById('speed-input');
+        
         slider.oninput = function() {
             config.delay = parseInt(this.value);
-            document.getElementById('speed-val').innerText = this.value + "ms";
+            speedInput.value = this.value;
             localStorage.setItem('katip-speed', this.value);
+            // Anlık tahmini güncelle
+            stats.estimatedWPM = calculateEstimatedWPM();
+            updateStatsDisplay();
+        };
+        
+        speedInput.oninput = function() {
+            let value = parseInt(this.value);
+            if (isNaN(value) || value < 1) value = 1;
+            if (value > 300) value = 300;
+            this.value = value;
+            config.delay = value;
+            slider.value = value;
+            localStorage.setItem('katip-speed', value);
+            // Anlık tahmini güncelle
+            stats.estimatedWPM = calculateEstimatedWPM();
+            updateStatsDisplay();
         };
 
         // Word limit toggle olayı
@@ -557,10 +639,23 @@
 
         // Word limit slider olayı
         const wordLimitSlider = document.getElementById('word-limit-slider');
+        const wordLimitInput = document.getElementById('word-limit-input');
+        
         wordLimitSlider.oninput = function() {
             config.wordLimit = parseInt(this.value);
-            document.getElementById('word-limit-val').innerText = this.value + " kelime";
+            wordLimitInput.value = this.value;
             localStorage.setItem('katip-word-limit', this.value);
+            updateStatsDisplay();
+        };
+        
+        wordLimitInput.oninput = function() {
+            let value = parseInt(this.value);
+            if (isNaN(value) || value < 10) value = 10;
+            if (value > 1500) value = 1500;
+            this.value = value;
+            config.wordLimit = value;
+            wordLimitSlider.value = value;
+            localStorage.setItem('katip-word-limit', value);
             updateStatsDisplay();
         };
 
@@ -624,6 +719,22 @@
             #word-limit-slider::-moz-range-thumb:hover {
                 transform: scale(1.2);
                 box-shadow: 0 4px 12px rgba(52,199,89,0.6);
+            }
+            #speed-input::-webkit-outer-spin-button,
+            #speed-input::-webkit-inner-spin-button {
+                -webkit-appearance: none;
+                margin: 0;
+            }
+            #speed-input[type=number] {
+                -moz-appearance: textfield;
+            }
+            #word-limit-input::-webkit-outer-spin-button,
+            #word-limit-input::-webkit-inner-spin-button {
+                -webkit-appearance: none;
+                margin: 0;
+            }
+            #word-limit-input[type=number] {
+                -moz-appearance: textfield;
             }
         `;
         document.head.appendChild(style);
