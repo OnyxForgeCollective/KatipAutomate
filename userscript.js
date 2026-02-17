@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.2
+// @version      v2.3
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -27,6 +27,9 @@
         mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none', // none, basic, advanced, custom
         mistakeRate: parseInt(localStorage.getItem('katip-mistake-rate')) || 3, // Her kaç kelimede bir hata
         mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 50, // Hata yapma şansı (%)
+        mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 1, // Hatadan sonra kaç kere silme
+        mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70, // Temizleme ihtimali (%)
+        mistakeRewriteCorrect: localStorage.getItem('katip-mistake-rewrite') !== 'false', // Hatadan sonra doğru kelimeyi yazma (default: true)
         humanLikeTyping: localStorage.getItem('katip-human-like') === 'true' // İnsan gibi yazma modu
     };
 
@@ -126,20 +129,33 @@
         simulateKey(element, typo);
         await sleep(getHumanLikeDelay());
         
-        // Decide: correct it or leave it
-        const shouldCorrect = Math.random() < 0.7; // 70% chance to correct
+        // Decide: correct it or leave it based on mistakeClearChance
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
         
         if (shouldCorrect) {
             // Pause briefly (noticing the mistake)
             await sleep(200 + Math.random() * 300);
             
-            // Backspace
-            simulateBackspace(element);
-            await sleep(getHumanLikeDelay());
+            // Backspace multiple times based on mistakeDeleteCount
+            const deleteCount = config.mistakeDeleteCount || 1;
+            for (let i = 0; i < deleteCount; i++) {
+                simulateBackspace(element);
+                await sleep(getHumanLikeDelay());
+            }
             
-            // Type correct character
-            simulateKey(element, word[mistakePos]);
-            await sleep(getHumanLikeDelay());
+            // Type correct characters back if mistakeRewriteCorrect is enabled
+            if (config.mistakeRewriteCorrect) {
+                // If we deleted more than the typo, we need to retype from earlier
+                const startPos = Math.max(0, mistakePos - deleteCount + 1);
+                for (let i = startPos; i <= mistakePos; i++) {
+                    simulateKey(element, word[i]);
+                    await sleep(getHumanLikeDelay());
+                }
+            } else {
+                // Just type the correct character
+                simulateKey(element, word[mistakePos]);
+                await sleep(getHumanLikeDelay());
+            }
         }
         
         // Type rest of the word
@@ -252,18 +268,24 @@
     }
 
     function updateStatsDisplay() {
+        const FORECAST_THRESHOLD = 0.9; // 90% threshold for flashing
         const wpmCalculated = document.getElementById('wpm-calculated');
         const wpmEstimated = document.getElementById('wpm-estimated');
-        const forecast1Calc = document.getElementById('forecast-1min-calc');
-        const forecast3Calc = document.getElementById('forecast-3min-calc');
-        const forecast5Calc = document.getElementById('forecast-5min-calc');
-        const forecast1Est = document.getElementById('forecast-1min-est');
-        const forecast3Est = document.getElementById('forecast-3min-est');
-        const forecast5Est = document.getElementById('forecast-5min-est');
         const wordsWritten = document.getElementById('words-written');
         const wordsRemaining = document.getElementById('words-remaining');
+        const wordsLimit = document.getElementById('words-limit');
+        const wordSeparator = document.getElementById('word-separator');
         const lastWordDisplay = document.getElementById('last-word-display');
         const lastWordStatus = document.getElementById('last-word-status');
+        const wordsWritten3min = document.getElementById('words-written-3min');
+        const wordsWritten5min = document.getElementById('words-written-5min');
+        const wordsWritten10min = document.getElementById('words-written-10min');
+        const forecast3Est = document.getElementById('forecast-3min-est');
+        const forecast5Est = document.getElementById('forecast-5min-est');
+        const forecast10Est = document.getElementById('forecast-10min-est');
+        const forecast3Box = document.getElementById('forecast-3min-box');
+        const forecast5Box = document.getElementById('forecast-5min-box');
+        const forecast10Box = document.getElementById('forecast-10min-box');
 
         // Güncelleme sırasında tahmini yeniden hesapla
         stats.estimatedWPM = calculateEstimatedWPM();
@@ -298,39 +320,47 @@
             wpmEstimated.style.color = estStyle.color;
             wpmEstimated.style.animation = estStyle.animation;
         }
-
-        if (forecast1Calc) {
-            forecast1Calc.innerText = stats.currentWPM;
-        }
-        if (forecast3Calc) {
-            forecast3Calc.innerText = Math.round(stats.currentWPM * 3);
-        }
-        if (forecast5Calc) {
-            forecast5Calc.innerText = Math.round(stats.currentWPM * 5);
-        }
-
-        if (forecast1Est) {
-            forecast1Est.innerText = stats.estimatedWPM;
-        }
-        if (forecast3Est) {
-            forecast3Est.innerText = Math.round(stats.estimatedWPM * 3);
-        }
-        if (forecast5Est) {
-            forecast5Est.innerText = Math.round(stats.estimatedWPM * 5);
-        }
         
+        // Update word counter display
         if (wordsWritten) {
             wordsWritten.innerText = stats.totalWords;
         }
         
-        if (wordsRemaining) {
+        if (wordSeparator && wordsRemaining && wordsLimit) {
             if (config.wordLimitEnabled) {
                 const remaining = Math.max(0, config.wordLimit - stats.totalWords);
                 wordsRemaining.innerText = remaining;
+                wordsLimit.innerText = config.wordLimit;
+                wordSeparator.style.display = 'inline';
             } else {
-                wordsRemaining.innerText = '—';
+                wordSeparator.style.display = 'none';
             }
         }
+
+        // Update forecast boxes
+        const elapsedMinutes = stats.startTime ? (Date.now() - stats.startTime) / 60000 : 0;
+        
+        // Helper function to update forecast box with threshold check
+        function updateForecastBox(displayElement, estElement, boxElement, minutes) {
+            if (displayElement) {
+                displayElement.innerText = stats.totalWords;
+            }
+            if (estElement) {
+                const forecast = Math.round(stats.estimatedWPM * minutes);
+                estElement.innerText = forecast;
+                
+                // Flash if above threshold
+                if (boxElement && stats.totalWords > forecast * FORECAST_THRESHOLD) {
+                    boxElement.style.animation = 'flash-orange 1s infinite';
+                } else if (boxElement) {
+                    boxElement.style.animation = 'none';
+                }
+            }
+        }
+        
+        updateForecastBox(wordsWritten3min, forecast3Est, forecast3Box, 3);
+        updateForecastBox(wordsWritten5min, forecast5Est, forecast5Box, 5);
+        updateForecastBox(wordsWritten10min, forecast10Est, forecast10Box, 10);
 
         // Update last word display
         if (lastWordDisplay) {
@@ -577,6 +607,17 @@
             // Track last word and whether it was correct
             stats.lastWord = wordToType;
             stats.lastWordCorrect = !shouldMakeMistake || wordWasCorrect;
+            
+            // Immediately update the display for last word
+            const lastWordDisplay = document.getElementById('last-word-display');
+            const lastWordStatus = document.getElementById('last-word-status');
+            if (lastWordDisplay) {
+                lastWordDisplay.innerText = stats.lastWord || '—';
+            }
+            if (lastWordStatus) {
+                lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
+                lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
+            }
 
             if (config.active) {
                 simulateKey(input, ' ');
@@ -649,7 +690,7 @@
         const panel = document.createElement('div');
         panel.id = 'katip-v12-panel';
         panel.innerHTML = `
-            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%;">
+            <div id="main-panel" style="transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
                 <!-- Left: Status and Controls -->
                 <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -691,10 +732,10 @@
                     </div>
                     
                     <!-- Word Counter (if enabled) -->
-                    <div style="background:rgba(255,149,0,0.1); border-radius:8px; padding:8px 12px; border:1px solid rgba(255,149,0,0.2); min-width: 100px;">
+                    <div id="word-counter-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:8px 12px; border:1px solid rgba(255,149,0,0.2); min-width: 100px;">
                         <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; text-transform:uppercase;">📊 Kelime</div>
-                        <div style="font-size:14px; font-weight:600; color:#ff9500;">
-                            <span id="words-written">0</span>/<span id="words-remaining">—</span>
+                        <div id="word-counter-display" style="font-size:14px; font-weight:600; color:#ff9500;">
+                            <span id="words-written">0</span><span id="word-separator" style="display:none;"> / <span id="words-remaining">—</span> / <span id="words-limit">—</span></span>
                         </div>
                     </div>
                 </div>
@@ -707,13 +748,13 @@
             </div>
             
             <!-- Settings Panel (slides up from bottom) -->
-            <div id="settings-panel" style="position:absolute; bottom:100%; left:0; right:0; background:rgba(28, 28, 30, 0.98); border-radius:12px 12px 0 0; padding:16px; opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 -8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1); border-bottom:none; max-height: 400px; overflow-y: auto;">
+            <div id="settings-panel" style="position:absolute; bottom:100%; left:0; right:0; background:rgba(28, 28, 30, 0.98); border-radius:12px 12px 0 0; padding:16px; opacity:0; pointer-events:none; transition:all 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 -8px 32px rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1); border-bottom:none; max-height: 500px; overflow-y: auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1);">
                     <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">⚙️ Ayarlar</span>
                     <span id="btn-close-settings" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">×</span>
                 </div>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <!-- Left Column -->
                     <div>
                         <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:12px; border:1px solid rgba(255,255,255,0.08);">
@@ -735,10 +776,9 @@
                         <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:12px; border:1px solid rgba(255,255,255,0.08);">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                                 <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">🎯 Kelime Limiti</label>
-                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                                    <input type="checkbox" id="word-limit-toggle" ${config.wordLimitEnabled ? 'checked' : ''} 
-                                        style="width:16px; height:16px; cursor:pointer;">
-                                    <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="word-limit-toggle" ${config.wordLimitEnabled ? 'checked' : ''}>
+                                    <span class="ios-slider"></span>
                                 </label>
                             </div>
                             <div id="word-limit-controls" style="display:${config.wordLimitEnabled ? 'block' : 'none'};">
@@ -757,10 +797,9 @@
                         <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; border:1px solid rgba(255,255,255,0.08);">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500;">🤖 İnsan Gibi Yaz</label>
-                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                                    <input type="checkbox" id="human-like-toggle" ${config.humanLikeTyping ? 'checked' : ''} 
-                                        style="width:16px; height:16px; cursor:pointer;">
-                                    <span style="font-size:11px; color:rgba(255,255,255,0.6);">Aktif</span>
+                                <label class="ios-switch">
+                                    <input type="checkbox" id="human-like-toggle" ${config.humanLikeTyping ? 'checked' : ''}>
+                                    <span class="ios-slider"></span>
                                 </label>
                             </div>
                             <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">Değişken hız ve rastgele duraklamalar</div>
@@ -795,8 +834,27 @@
                                             style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
                                             border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
                                     </div>
-                                    <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4;">
+                                    <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-bottom:8px;">
                                         <strong>%<span id="mistake-chance-display">${config.mistakeChance}</span></strong> ihtimalle hata yapılır
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Silme sayısı</span>
+                                        <input type="number" id="mistake-delete-count-input" min="1" max="10" value="${config.mistakeDeleteCount}"
+                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Temizleme ihtimali</span>
+                                        <input type="number" id="mistake-clear-chance-input" min="0" max="100" value="${config.mistakeClearChance}"
+                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                                        <label style="font-size:11px; color:rgba(255,255,255,0.5);">Doğrusunu yaz</label>
+                                        <label class="ios-switch">
+                                            <input type="checkbox" id="mistake-rewrite-toggle" ${config.mistakeRewriteCorrect ? 'checked' : ''}>
+                                            <span class="ios-slider"></span>
+                                        </label>
                                     </div>
                                 </div>
                                 <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">
@@ -808,22 +866,43 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Predictions Row -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                    <div id="forecast-3min-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:10px; border:1px solid rgba(255,149,0,0.2);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⏱️ 3 Dakika</div>
+                        <div style="font-size:13px; font-weight:600; color:#ff9500;">
+                            <span id="words-written-3min">0</span> / <span id="forecast-3min-est">0</span>
+                        </div>
+                    </div>
+                    <div id="forecast-5min-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:10px; border:1px solid rgba(255,149,0,0.2);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⏱️ 5 Dakika</div>
+                        <div style="font-size:13px; font-weight:600; color:#ff9500;">
+                            <span id="words-written-5min">0</span> / <span id="forecast-5min-est">0</span>
+                        </div>
+                    </div>
+                    <div id="forecast-10min-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:10px; border:1px solid rgba(255,149,0,0.2);">
+                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⏱️ 10 Dakika</div>
+                        <div style="font-size:13px; font-weight:600; color:#ff9500;">
+                            <span id="words-written-10min">0</span> / <span id="forecast-10min-est">0</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
 
         Object.assign(panel.style, {
             position: 'fixed',
             bottom: '0',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'calc(100% - 40px)',
-            maxWidth: '1400px',
+            left: '0',
+            right: '0',
+            width: '100%',
             height: 'auto',
             background: 'rgba(28, 28, 30, 0.95)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
             color: 'white',
-            padding: '12px 20px',
+            padding: '12px 0',
             borderRadius: '12px 12px 0 0',
             zIndex: '999999',
             border: '1px solid rgba(255,255,255,0.1)',
@@ -840,7 +919,7 @@
 
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
-        icon.innerHTML = '<span style="font-weight:700; font-size:20px;">⌨️</span>';
+        icon.innerHTML = '<span style="font-weight:700; font-size:18px; color:#ffffff; text-shadow: 0 0 10px rgba(255,255,255,0.8);">KF</span>';
         icon.setAttribute('role', 'button');
         icon.setAttribute('aria-label', 'Paneli Aç');
         icon.setAttribute('tabindex', '0');
@@ -849,13 +928,13 @@
             bottom: '20px',
             left: '50%',
             transform: 'translateX(-50%)',
-            width: '50px',
-            height: '50px',
+            width: '60px',
+            height: '60px',
             background: 'rgba(28, 28, 30, 0.95)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-            border: '2px solid rgba(0,122,255,0.4)',
-            borderRadius: '12px',
+            border: '3px solid transparent',
+            borderRadius: '50%',
             display: config.panelMinimized ? 'flex' : 'none',
             justifyContent: 'center',
             alignItems: 'center',
@@ -863,7 +942,7 @@
             zIndex: '999999',
             boxShadow: '0 0 30px rgba(0,122,255,0.5), 0 8px 24px rgba(0,0,0,0.3)',
             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            animation: 'kf-glow 2s ease-in-out infinite'
+            animation: 'kf-rainbow-glow 3s linear infinite'
         });
 
         document.body.appendChild(panel);
@@ -873,29 +952,47 @@
         const settingsPanel = document.getElementById('settings-panel');
         const mainPanelEl = document.getElementById('main-panel');
         
+        // Minimize/Maximize events
+        const DOM_UPDATE_DELAY = 100; // Wait for browser to complete layout recalculation after panel display changes
+        
+        function updateBodyPadding() {
+            if (!config.panelMinimized && panel.style.display !== 'none') {
+                const panelHeight = panel.offsetHeight;
+                document.documentElement.style.setProperty('--katip-panel-height', `${panelHeight}px`);
+                document.body.classList.add('katip-panel-open');
+            } else {
+                document.body.classList.remove('katip-panel-open');
+            }
+        }
+        
         document.getElementById('btn-settings').onclick = () => {
             if (settingsPanel.style.opacity === '1') {
                 // Close settings panel
                 settingsPanel.style.opacity = '0';
                 settingsPanel.style.pointerEvents = 'none';
+                panel.style.borderRadius = '12px 12px 0 0';
             } else {
-                // Open settings panel
+                // Open settings panel - remove rounded corners from main panel
                 settingsPanel.style.opacity = '1';
                 settingsPanel.style.pointerEvents = 'auto';
+                panel.style.borderRadius = '0';
             }
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
         
         document.getElementById('btn-close-settings').onclick = () => {
             settingsPanel.style.opacity = '0';
             settingsPanel.style.pointerEvents = 'none';
+            panel.style.borderRadius = '12px 12px 0 0';
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
-
-        // Minimize/Maximize events
+        
         document.getElementById('btn-minimize').onclick = () => {
             panel.style.display = 'none';
             icon.style.display = 'flex';
             config.panelMinimized = true;
             localStorage.setItem('katip-panel-minimized', 'true');
+            document.body.classList.remove('katip-panel-open');
         };
 
         icon.onclick = () => {
@@ -903,7 +1000,13 @@
             panel.style.display = 'block';
             config.panelMinimized = false;
             localStorage.setItem('katip-panel-minimized', 'false');
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
         };
+        
+        // Update padding when panel is first shown
+        if (!config.panelMinimized) {
+            setTimeout(updateBodyPadding, DOM_UPDATE_DELAY);
+        }
 
         // Hover effects
         const minimizeBtn = document.getElementById('btn-minimize');
@@ -1056,6 +1159,42 @@
                 mistakeChanceDisplay.innerText = value;
             }
         };
+        
+        // Mistake delete count input
+        const mistakeDeleteCountInput = document.getElementById('mistake-delete-count-input');
+        if (mistakeDeleteCountInput) {
+            mistakeDeleteCountInput.oninput = function() {
+                let value = parseInt(this.value);
+                if (isNaN(value) || value < 1) value = 1;
+                if (value > 10) value = 10;
+                this.value = value;
+                config.mistakeDeleteCount = value;
+                localStorage.setItem('katip-mistake-delete-count', value);
+            };
+        }
+        
+        // Mistake clear chance input
+        const mistakeClearChanceInput = document.getElementById('mistake-clear-chance-input');
+        if (mistakeClearChanceInput) {
+            mistakeClearChanceInput.oninput = function() {
+                let value = parseInt(this.value);
+                if (isNaN(value) || value < 0) value = 0;
+                if (value > 100) value = 100;
+                this.value = value;
+                config.mistakeClearChance = value;
+                localStorage.setItem('katip-mistake-clear-chance', value);
+            };
+        }
+        
+        // Mistake rewrite toggle
+        const mistakeRewriteToggle = document.getElementById('mistake-rewrite-toggle');
+        if (mistakeRewriteToggle) {
+            mistakeRewriteToggle.onchange = function() {
+                config.mistakeRewriteCorrect = this.checked;
+                localStorage.setItem('katip-mistake-rewrite', String(this.checked));
+                logger(`Doğrusunu yazma modu ${this.checked ? 'aktif' : 'deaktif'}`);
+            };
+        }
 
         // Slider stili
         const style = document.createElement('style');
@@ -1071,6 +1210,37 @@
                 }
             }
             
+            @keyframes kf-rainbow-glow {
+                0% {
+                    border-color: #ff0000;
+                    box-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000, 0 0 60px #ff0000, 0 8px 24px rgba(0,0,0,0.3);
+                }
+                16% {
+                    border-color: #ff7f00;
+                    box-shadow: 0 0 20px #ff7f00, 0 0 40px #ff7f00, 0 0 60px #ff7f00, 0 8px 24px rgba(0,0,0,0.3);
+                }
+                33% {
+                    border-color: #ffff00;
+                    box-shadow: 0 0 20px #ffff00, 0 0 40px #ffff00, 0 0 60px #ffff00, 0 8px 24px rgba(0,0,0,0.3);
+                }
+                50% {
+                    border-color: #00ff00;
+                    box-shadow: 0 0 20px #00ff00, 0 0 40px #00ff00, 0 0 60px #00ff00, 0 8px 24px rgba(0,0,0,0.3);
+                }
+                66% {
+                    border-color: #0000ff;
+                    box-shadow: 0 0 20px #0000ff, 0 0 40px #0000ff, 0 0 60px #0000ff, 0 8px 24px rgba(0,0,0,0.3);
+                }
+                83% {
+                    border-color: #4b0082;
+                    box-shadow: 0 0 20px #4b0082, 0 0 40px #4b0082, 0 0 60px #4b0082, 0 8px 24px rgba(0,0,0,0.3);
+                }
+                100% {
+                    border-color: #ff0000;
+                    box-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000, 0 0 60px #ff0000, 0 8px 24px rgba(0,0,0,0.3);
+                }
+            }
+            
             @keyframes flash-red {
                 0%, 100% {
                     color: #ff3b30;
@@ -1080,6 +1250,66 @@
                     color: #ff8080;
                     text-shadow: 0 0 20px rgba(255,59,48,1);
                 }
+            }
+            
+            @keyframes flash-orange {
+                0%, 100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.5;
+                }
+            }
+            
+            /* iOS Switch Styles */
+            .ios-switch {
+                position: relative;
+                display: inline-block;
+                width: 42px;
+                height: 24px;
+            }
+            
+            .ios-switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            
+            .ios-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: rgba(255,255,255,0.2);
+                transition: 0.3s;
+                border-radius: 24px;
+            }
+            
+            .ios-slider:before {
+                position: absolute;
+                content: "";
+                height: 18px;
+                width: 18px;
+                left: 3px;
+                bottom: 3px;
+                background-color: white;
+                transition: 0.3s;
+                border-radius: 50%;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            }
+            
+            input:checked + .ios-slider {
+                background-color: #34c759;
+            }
+            
+            input:checked + .ios-slider:before {
+                transform: translateX(18px);
+            }
+            
+            .ios-slider:hover {
+                opacity: 0.9;
             }
             
             #bot-slider::-webkit-slider-thumb {
@@ -1172,6 +1402,11 @@
             #mistake-mode option {
                 background: rgba(28, 28, 30, 0.98);
                 color: #ffffff;
+            }
+            
+            /* Push content up when panel is visible */
+            body.katip-panel-open {
+                padding-bottom: var(--katip-panel-height, 0px);
             }
         `;
         document.head.appendChild(style);
