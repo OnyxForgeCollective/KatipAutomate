@@ -43,7 +43,8 @@
     // --- İSTATİSTİK FONKSİYONLARI ---
     function updateStats(char) {
         stats.totalChars++;
-        if (char === ' ' || char === '\n') {
+        // Word count: increment when we type a space after a non-space character
+        if ((char === ' ' || char === '\n') && stats.totalChars > 1) {
             stats.totalWords++;
         }
 
@@ -326,7 +327,7 @@
                     <div style="width:8px; height:8px; border-radius:50%; background:#34c759; box-shadow:0 0 8px rgba(52,199,89,0.6);"></div>
                     <span style="font-weight:600; font-size:15px; color:#ffffff; letter-spacing:-0.3px;">KatipOnline</span>
                 </div>
-                <span id="btn-minimize" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px; hover:background:rgba(255,255,255,0.1);">−</span>
+                <span id="btn-minimize" style="cursor:pointer; color:rgba(255,255,255,0.6); font-size:18px; font-weight:300; transition:color 0.2s; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px;">−</span>
             </div>
             
             <div style="margin-bottom:16px;">

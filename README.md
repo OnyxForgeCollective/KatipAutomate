@@ -94,7 +94,7 @@ Bu script'i kullanabilmek için öncelikle bir **userscript yöneticisi** eklent
 
 #### 2. Panel Açma
 - Sağ alt köşede **"KatiponlineFucker"** panelini göreceksiniz
-- Eğer panel küçültülmüş durumda ise (sadece "K" harfi görünüyorsa), üzerine tıklayın
+- Eğer panel küçültülmüş durumda ise (sadece ⌨️ emojisi görünüyorsa), üzerine tıklayın
 
 #### 3. Hız Ayarlama
 - Paneldeki kaydırıcıyı (slider) kullanarak yazma hızını ayarlayın
