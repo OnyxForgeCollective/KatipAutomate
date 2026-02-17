@@ -286,6 +286,13 @@
         const forecast3Box = document.getElementById('forecast-3min-box');
         const forecast5Box = document.getElementById('forecast-5min-box');
         const forecast10Box = document.getElementById('forecast-10min-box');
+        
+        // Taskbar compact stats elements
+        const taskbarWpmCalculated = document.getElementById('taskbar-wpm-calculated');
+        const taskbarWpmEstimated = document.getElementById('taskbar-wpm-estimated');
+        const taskbarWordLimit = document.getElementById('taskbar-word-limit');
+        const taskbarWordsWritten = document.getElementById('taskbar-words-written');
+        const taskbarWordsLimit = document.getElementById('taskbar-words-limit');
 
         // Güncelleme sırasında tahmini yeniden hesapla
         stats.estimatedWPM = calculateEstimatedWPM();
@@ -301,24 +308,50 @@
             } else if (wpm > 120) {
                 return { color: '#ff3b30', animation: 'none' };
             } else if (wpm > 80) {
-                return { color: '#ffcc00', animation: 'none' };
+                return { color: '#ffcc00', animation: 'flash-yellow 1s infinite' };
             } else {
                 return { color: '#007aff', animation: 'none' };
             }
         }
 
+        const calcStyle = getWPMStyle(calcWPM);
+        const estStyle = getWPMStyle(estWPM);
+
+        // Update main stats
         if (wpmCalculated) {
-            const calcStyle = getWPMStyle(calcWPM);
             wpmCalculated.innerText = calcWPM;
             wpmCalculated.style.color = calcStyle.color;
             wpmCalculated.style.animation = calcStyle.animation;
         }
         
         if (wpmEstimated) {
-            const estStyle = getWPMStyle(estWPM);
             wpmEstimated.innerText = estWPM;
             wpmEstimated.style.color = estStyle.color;
             wpmEstimated.style.animation = estStyle.animation;
+        }
+        
+        // Update taskbar compact stats
+        if (taskbarWpmCalculated) {
+            taskbarWpmCalculated.innerText = calcWPM;
+            taskbarWpmCalculated.style.color = calcStyle.color;
+            taskbarWpmCalculated.style.animation = calcStyle.animation;
+        }
+        
+        if (taskbarWpmEstimated) {
+            taskbarWpmEstimated.innerText = estWPM;
+            taskbarWpmEstimated.style.color = estStyle.color;
+            taskbarWpmEstimated.style.animation = estStyle.animation;
+        }
+        
+        // Update taskbar word limit display
+        if (taskbarWordLimit) {
+            if (config.wordLimitEnabled) {
+                taskbarWordLimit.style.display = 'flex';
+                if (taskbarWordsWritten) taskbarWordsWritten.innerText = stats.totalWords;
+                if (taskbarWordsLimit) taskbarWordsLimit.innerText = config.wordLimit;
+            } else {
+                taskbarWordLimit.style.display = 'none';
+            }
         }
         
         // Update word counter display
@@ -693,7 +726,7 @@
             <div id="main-panel" style="transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; gap: 12px; align-items: center; width: 100%; padding: 0 12px;">
                 <!-- Left: Status and Controls -->
                 <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
-                    <div style="display:flex; align-items:center; gap:8px;">
+                    <div id="katip-branding" style="display:flex; align-items:center; gap:8px;">
                         <div style="width:8px; height:8px; border-radius:50%; background:#34c759; box-shadow:0 0 8px rgba(52,199,89,0.6);"></div>
                         <span style="font-weight:600; font-size:14px; color:#ffffff; letter-spacing:-0.3px;">KatipOnline</span>
                     </div>
@@ -717,6 +750,26 @@
                         style="flex:1; height:4px; border-radius:2px; outline:none; -webkit-appearance:none; 
                         background:rgba(255,255,255,0.1); cursor:pointer;">
                     <span id="taskbar-speed-value" style="font-size:11px; color:#007aff; font-weight:600; min-width:40px; text-align:right;">${config.delay}ms</span>
+                </div>
+                
+                <!-- Taskbar Compact Stats (visible when settings closed) -->
+                <div id="taskbar-compact-stats" style="display:none; align-items:center; gap:6px;">
+                    <!-- Hesaplanan (Calculated) -->
+                    <div style="display:flex; align-items:center; gap:3px; padding:4px 8px; background:rgba(255,59,48,0.1); border-radius:6px; border:1px solid rgba(255,59,48,0.2);">
+                        <span style="font-size:8px; color:rgba(255,255,255,0.5); font-weight:600; text-transform:uppercase;">H:</span>
+                        <span id="taskbar-wpm-calculated" style="font-size:10px; font-weight:700; color:#ff3b30;">0</span>
+                    </div>
+                    <!-- Hedeflenen (Targeted) -->
+                    <div style="display:flex; align-items:center; gap:3px; padding:4px 8px; background:rgba(255,204,0,0.1); border-radius:6px; border:1px solid rgba(255,204,0,0.2);">
+                        <span style="font-size:8px; color:rgba(255,255,255,0.5); font-weight:600; text-transform:uppercase;">Hdf:</span>
+                        <span id="taskbar-wpm-estimated" style="font-size:10px; font-weight:700; color:#ffcc00;">0</span>
+                    </div>
+                    <!-- Word Limit (if enabled) -->
+                    <div id="taskbar-word-limit" style="display:none; align-items:center; gap:3px; padding:4px 8px; background:rgba(255,149,0,0.1); border-radius:6px; border:1px solid rgba(255,149,0,0.2);">
+                        <span id="taskbar-words-written">0</span>
+                        <span style="font-size:8px; color:rgba(255,255,255,0.5);">/</span>
+                        <span id="taskbar-words-limit">0</span>
+                    </div>
                 </div>
 
                 <!-- Center: Stats (Horizontal) -->
@@ -780,6 +833,7 @@
                                 <span style="font-size:9px; color:rgba(255,255,255,0.4);">Hızlı (1ms)</span>
                                 <span style="font-size:9px; color:rgba(255,255,255,0.4);">Yavaş (300ms)</span>
                             </div>
+                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-top:6px; font-style:italic;">Her karakter arası bekleme süresi. Düşük değer = daha hızlı yazım.</div>
                         </div>
 
                         <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:12px; border:1px solid rgba(255,255,255,0.08);">
@@ -801,6 +855,7 @@
                                     style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none; 
                                     background:rgba(255,255,255,0.1); cursor:pointer;">
                             </div>
+                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-top:6px; font-style:italic;">Belirtilen kelime sayısına ulaşınca otomatik durur.</div>
                         </div>
 
                         <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; border:1px solid rgba(255,255,255,0.08);">
@@ -811,7 +866,7 @@
                                     <span class="ios-slider"></span>
                                 </label>
                             </div>
-                            <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">Değişken hız ve rastgele duraklamalar</div>
+                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-top:6px; font-style:italic;">Değişken hız ve rastgele duraklamalarla daha doğal yazım.</div>
                         </div>
                     </div>
                     
@@ -827,6 +882,7 @@
                                     <option value="custom" ${config.mistakeMode === 'custom' ? 'selected' : ''}>Özel Mod</option>
                                 </select>
                             </div>
+                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-bottom:8px; font-style:italic;">Yazarken kasıtlı hatalar yapar, daha gerçekçi görünüm sağlar.</div>
                             <div id="mistake-controls" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'};">
                                 <div id="mistake-rate-control" style="display:${config.mistakeMode === 'basic' || config.mistakeMode === 'advanced' ? 'block' : 'none'}; margin-bottom:8px;">
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
@@ -866,9 +922,9 @@
                                         </label>
                                     </div>
                                 </div>
-                                <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-top:6px;">
-                                    <div style="margin-bottom:4px;"><strong>Basit:</strong> Sadece takip edilir</div>
-                                    <div style="margin-bottom:4px;"><strong>Gelişmiş:</strong> Hata yazar, %70 düzeltir</div>
+                                <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-top:6px; font-style:italic;">
+                                    <div style="margin-bottom:3px;"><strong>Basit:</strong> Sadece takip edilir</div>
+                                    <div style="margin-bottom:3px;"><strong>Gelişmiş:</strong> Hata yazar, %70 düzeltir</div>
                                     <div><strong>Özel:</strong> İhtimal bazlı hata yapma</div>
                                 </div>
                             </div>
@@ -877,22 +933,22 @@
                 </div>
                 
                 <!-- Predictions Row -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                    <div id="forecast-3min-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:10px; border:1px solid rgba(255,149,0,0.2);">
-                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⏱️ 3 Dakika</div>
-                        <div style="font-size:13px; font-weight:600; color:#ff9500;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                    <div id="forecast-3min-box" style="background:rgba(255,159,10,0.08); border-radius:6px; padding:6px 8px; border:1px solid rgba(255,159,10,0.15);">
+                        <div style="font-size:8px; color:rgba(255,255,255,0.4); margin-bottom:2px; font-weight:600; text-transform:uppercase;">⏱ 3dk</div>
+                        <div style="font-size:11px; font-weight:600; color:#ff9f0a;">
                             <span id="words-written-3min">0</span> / <span id="forecast-3min-est">0</span>
                         </div>
                     </div>
-                    <div id="forecast-5min-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:10px; border:1px solid rgba(255,149,0,0.2);">
-                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⏱️ 5 Dakika</div>
-                        <div style="font-size:13px; font-weight:600; color:#ff9500;">
+                    <div id="forecast-5min-box" style="background:rgba(255,179,64,0.08); border-radius:6px; padding:6px 8px; border:1px solid rgba(255,179,64,0.15);">
+                        <div style="font-size:8px; color:rgba(255,255,255,0.4); margin-bottom:2px; font-weight:600; text-transform:uppercase;">⏱ 5dk</div>
+                        <div style="font-size:11px; font-weight:600; color:#ffb340;">
                             <span id="words-written-5min">0</span> / <span id="forecast-5min-est">0</span>
                         </div>
                     </div>
-                    <div id="forecast-10min-box" style="background:rgba(255,149,0,0.1); border-radius:8px; padding:10px; border:1px solid rgba(255,149,0,0.2);">
-                        <div style="font-size:9px; color:rgba(255,255,255,0.5); margin-bottom:4px; font-weight:600; text-transform:uppercase;">⏱️ 10 Dakika</div>
-                        <div style="font-size:13px; font-weight:600; color:#ff9500;">
+                    <div id="forecast-10min-box" style="background:rgba(255,149,0,0.08); border-radius:6px; padding:6px 8px; border:1px solid rgba(255,149,0,0.15);">
+                        <div style="font-size:8px; color:rgba(255,255,255,0.4); margin-bottom:2px; font-weight:600; text-transform:uppercase;">⏱ 10dk</div>
+                        <div style="font-size:11px; font-weight:600; color:#ff9500;">
                             <span id="words-written-10min">0</span> / <span id="forecast-10min-est">0</span>
                         </div>
                     </div>
@@ -929,30 +985,29 @@
 
         const icon = document.createElement('div');
         icon.id = 'katip-icon';
-        icon.innerHTML = '<span style="font-weight:700; font-size:18px; color:#ffffff; text-shadow: 0 0 10px rgba(255,255,255,0.8);">KF</span>';
+        icon.innerHTML = '<span style="font-weight:400; font-size:14px; color:#007aff; letter-spacing:0.5px;">KF</span>';
         icon.setAttribute('role', 'button');
         icon.setAttribute('aria-label', 'Paneli Aç');
         icon.setAttribute('tabindex', '0');
         Object.assign(icon.style, {
             position: 'fixed',
-            bottom: '20px',
+            bottom: '8px',
             left: '50%',
             transform: 'translateX(-50%)',
-            width: '60px',
-            height: '60px',
-            background: 'rgba(28, 28, 30, 0.95)',
-            backdropFilter: 'blur(20px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-            border: '3px solid transparent',
-            borderRadius: '50%',
+            width: '44px',
+            height: '44px',
+            background: 'rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: '1px solid rgba(0,122,255,0.2)',
+            borderRadius: '12px',
             display: config.panelMinimized ? 'flex' : 'none',
             justifyContent: 'center',
             alignItems: 'center',
             cursor: 'pointer',
             zIndex: '999999',
-            boxShadow: '0 0 30px rgba(0,122,255,0.5), 0 8px 24px rgba(0,0,0,0.3)',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            animation: 'kf-rainbow-glow 3s linear infinite'
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         });
 
         document.body.appendChild(panel);
@@ -977,18 +1032,23 @@
         
         function toggleTaskbarMode(isSettingsOpen) {
             const taskbarSlider = document.getElementById('taskbar-speed-slider');
+            const taskbarCompactStats = document.getElementById('taskbar-compact-stats');
             const statsContainer = document.getElementById('stats-container');
+            const katipBranding = document.getElementById('katip-branding');
             
             if (isSettingsOpen) {
-                // Settings open - Full width mode
+                // Settings open - Full width mode (Maximize mode)
                 panel.style.left = '0';
                 panel.style.right = '0';
                 panel.style.transform = 'none';
                 panel.style.width = '100%';
                 panel.style.maxWidth = '100%';
                 mainPanelEl.style.padding = '0 16px';
+                mainPanelEl.style.fontSize = '130%'; // Increase text size by 130%
                 taskbarSlider.style.display = 'none';
+                taskbarCompactStats.style.display = 'none';
                 statsContainer.style.display = 'flex';
+                katipBranding.style.display = 'flex';
             } else {
                 // Settings closed - Taskbar mode (centered, compact)
                 panel.style.left = '50%';
@@ -997,8 +1057,11 @@
                 panel.style.width = 'auto';
                 panel.style.maxWidth = '95%';
                 mainPanelEl.style.padding = '0 12px';
+                mainPanelEl.style.fontSize = '100%'; // Normal text size
                 taskbarSlider.style.display = 'flex';
+                taskbarCompactStats.style.display = 'flex';
                 statsContainer.style.display = 'none';
+                katipBranding.style.display = 'none'; // Hide KatipOnline branding in taskbar mode
             }
         }
         
@@ -1070,12 +1133,14 @@
         };
 
         icon.onmouseenter = () => {
-            icon.style.transform = 'translateX(-50%) scale(1.15)';
-            icon.style.boxShadow = '0 0 40px rgba(0,122,255,0.7), 0 12px 32px rgba(0,0,0,0.4)';
+            icon.style.transform = 'translateX(-50%) scale(1.08)';
+            icon.style.boxShadow = '0 4px 12px rgba(0,122,255,0.3)';
+            icon.style.background = 'rgba(255, 255, 255, 0.12)';
         };
         icon.onmouseleave = () => {
             icon.style.transform = 'translateX(-50%) scale(1)';
-            icon.style.boxShadow = '0 0 30px rgba(0,122,255,0.5), 0 8px 24px rgba(0,0,0,0.3)';
+            icon.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+            icon.style.background = 'rgba(255, 255, 255, 0.08)';
         };
 
         const mainBtn = document.getElementById('btn-main');
@@ -1318,6 +1383,17 @@
                 50% {
                     color: #ff8080;
                     text-shadow: 0 0 20px rgba(255,59,48,1);
+                }
+            }
+            
+            @keyframes flash-yellow {
+                0%, 100% {
+                    color: #ffcc00;
+                    text-shadow: 0 0 10px rgba(255,204,0,0.8);
+                }
+                50% {
+                    color: #ffeb3b;
+                    text-shadow: 0 0 20px rgba(255,204,0,1);
                 }
             }
             
