@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.5
+// @version      v2.6
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -58,6 +58,7 @@
         wordHistory: [],       // {word, hadMistake, mistakeType, corrected} - last 30
         totalMistakes: 0,
         correctedMistakes: 0,
+        mistakeWordCount: 0,   // completed-word count used by shouldMakeMistake
     };
 
     const logger = (msg, type = 'info') => {
@@ -169,11 +170,11 @@
      */
     function shouldMakeMistake(wordCount) {
         if (config.mistakeMode === 'rate') {
-            // Every mistakeRate words (never on word 0)
-            return wordCount > 0 && wordCount % config.mistakeRate === 0;
+            // Trigger on word number (wordCount+1); e.g. rate=5 → words 5,10,15…
+            return (wordCount + 1) % config.mistakeRate === 0;
         }
         if (config.mistakeMode === 'chance') {
-            // Each word has mistakeChance% independent probability
+            // Each word has an independent mistakeChance% probability
             return Math.random() * 100 < config.mistakeChance;
         }
         return false;
@@ -407,11 +408,13 @@
         if (stats.totalMistakes > 0) {
             text += `Düzeltme oranı: <strong>%${correctionRate}</strong>.`;
         }
-        // Next-mistake prediction
+        // Next-mistake prediction (uses same formula as shouldMakeMistake)
         if (config.mistakeMode === 'rate') {
-            const rem = stats.totalWords % config.mistakeRate;
+            const wc = stats.mistakeWordCount;
+            // Words until (wc+1+k) % rate === 0
+            const rem = (wc + 1) % config.mistakeRate;
             const wordsToNext = rem === 0 ? 0 : config.mistakeRate - rem;
-            if (wordsToNext <= 2) {
+            if (wordsToNext === 0) {
                 text += ` ⚡ <strong>Hata bekleniyor!</strong>`;
             } else {
                 text += ` Sonraki hata tahmini: <strong>${wordsToNext} kelime sonra</strong>.`;
@@ -435,7 +438,8 @@
         if (correctedEl) correctedEl.innerText = stats.correctedMistakes;
         if (nextPredEl) {
             if (config.mistakeMode === 'rate') {
-                const rem = stats.totalWords % config.mistakeRate;
+                const wc = stats.mistakeWordCount;
+                const rem = (wc + 1) % config.mistakeRate;
                 const n = rem === 0 ? 0 : config.mistakeRate - rem;
                 nextPredEl.innerText = n === 0 ? '⚡ şimdi!' : n + ' kelime';
             } else if (config.mistakeMode === 'chance') {
@@ -502,6 +506,7 @@
         stats.wordHistory = [];
         stats.totalMistakes = 0;
         stats.correctedMistakes = 0;
+        stats.mistakeWordCount = 0;
 
         // Her saniye istatistikleri güncelle
         if (stats.updateInterval) clearInterval(stats.updateInterval);
@@ -770,12 +775,26 @@
         let wordCount = 0;
         if (input.value) {
             const typedWords = input.value.trim().split(/\s+/).filter(Boolean);
-            // If the last char is a non-space, that word is still in progress
+            // Completed words = all words if ends with space, else all but the last (in-progress)
             wordCount = /\s$/.test(input.value) ? typedWords.length : Math.max(0, typedWords.length - 1);
             // Sync stats so next-mistake prediction uses the correct base
             stats.totalWords = wordCount;
+            stats.mistakeWordCount = wordCount;
         }
+
+        // Resume mid-word: initialise currentWord to the partial word already typed so that
+        // the first character we type won't look like "start of new word" and trigger a mistake.
         let currentWord = '';
+        if (input.value && !/\s$/.test(input.value)) {
+            const parts = input.value.split(/\s+/);
+            currentWord = parts[parts.length - 1] || '';
+        }
+
+        // Fix lastCharWasSpace after startStatsTracking reset it to true regardless of position
+        if (input.value.length > 0) {
+            const last = input.value[input.value.length - 1];
+            lastCharWasSpace = /\s/.test(last);
+        }
 
         while (config.active) {
             const sourceText = source.value;
@@ -803,6 +822,7 @@
                 stats.wordHistory.push({ word: currentWord, hadMistake: false, mistakeType: null, corrected: false });
                 if (stats.wordHistory.length > 30) stats.wordHistory.shift();
                 wordCount++;
+                stats.mistakeWordCount = wordCount;
                 currentWord = '';
             } else if (!isSpace) {
                 currentWord += charToType;
@@ -812,7 +832,18 @@
                     const remainingWord = sourceText.slice(currentVal.length).split(/[\s\n\t]/)[0];
                     if (remainingWord.length >= MIN_WORD_LEN_FOR_MISTAKE) {
                         logger(`Hata yapılıyor: ${remainingWord}`);
+                        const preMistakeLength = currentVal.length;
                         await typeWithMistake(input, remainingWord);
+                        // Snap position: uncorrected double (+1) or skip (-1) mistakes leave wrong length.
+                        // Backspace any surplus characters silently.
+                        const expectedLength = preMistakeLength + remainingWord.length;
+                        while (input.value.length > expectedLength) {
+                            simulateBackspace(input);
+                        }
+                        // If somehow shorter (skip uncorrected), fill from sourceText.
+                        while (input.value.length < expectedLength && input.value.length < sourceText.length) {
+                            simulateKey(input, sourceText[input.value.length]);
+                        }
                         // Track this mistake word
                         const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
                         stats.wordHistory.push({
@@ -823,6 +854,7 @@
                         });
                         if (stats.wordHistory.length > 30) stats.wordHistory.shift();
                         wordCount++;
+                        stats.mistakeWordCount = wordCount;
                         currentWord = '';
                         continue;
                     }
@@ -1013,6 +1045,7 @@
             }
             
             wordCount++;
+            stats.mistakeWordCount = wordCount;
         }
     }
 
@@ -1237,19 +1270,37 @@
                             <div id="mistake-controls" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'};">
 
                                 <!-- Rate-specific -->
-                                <div id="mistake-rate-row" style="display:${config.mistakeMode === 'rate' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
-                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
-                                    <input type="number" id="mistake-rate-input" min="2" max="20" value="${config.mistakeRate}"
-                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                <div id="mistake-rate-row" style="display:${config.mistakeMode === 'rate' ? 'block' : 'none'}; margin-bottom:8px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
+                                        <input type="number" id="mistake-rate-input" min="2" max="20" value="${config.mistakeRate}"
+                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                    <input type="range" id="mistake-rate-slider" min="2" max="20" step="1" value="${config.mistakeRate}"
+                                        style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none;
+                                        background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:4px;">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">Her 2'de bir</span>
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">Her 20'de bir</span>
+                                    </div>
                                 </div>
 
                                 <!-- Chance-specific -->
-                                <div id="mistake-chance-row" style="display:${config.mistakeMode === 'chance' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
-                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata ihtimali (%)</span>
-                                    <input type="number" id="mistake-chance-input" min="1" max="100" value="${config.mistakeChance}"
-                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                <div id="mistake-chance-row" style="display:${config.mistakeMode === 'chance' ? 'block' : 'none'}; margin-bottom:8px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata ihtimali (%)</span>
+                                        <input type="number" id="mistake-chance-input" min="1" max="100" value="${config.mistakeChance}"
+                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                    <input type="range" id="mistake-chance-slider" min="1" max="100" step="1" value="${config.mistakeChance}"
+                                        style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none;
+                                        background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:4px;">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">%1</span>
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">%100</span>
+                                    </div>
                                 </div>
 
                                 <!-- Common: correction chance + delete count -->
@@ -1639,37 +1690,41 @@
             controls.style.display = this.value !== 'none' ? 'block' : 'none';
             if (analysisSection) analysisSection.style.display = this.value !== 'none' ? 'block' : 'none';
 
-            if (rateRow)   rateRow.style.display   = this.value === 'rate'   ? 'flex' : 'none';
-            if (chanceRow) chanceRow.style.display = this.value === 'chance' ? 'flex' : 'none';
+            // Rate/chance rows are block containers (label+input / slider / labels stacked vertically).
+            if (rateRow)   rateRow.style.display   = this.value === 'rate'   ? 'block' : 'none';
+            if (chanceRow) chanceRow.style.display = this.value === 'chance' ? 'block' : 'none';
 
-            // Refresh chart when mode changes
             updateMistakeChart();
             logger(`Hata modu: ${this.value}`);
         };
 
-        // Mistake rate input (rate mode)
-        const mistakeRateInput = document.getElementById('mistake-rate-input');
-        mistakeRateInput.oninput = function() {
-            let value = parseInt(this.value);
-            if (isNaN(value) || value < 2) value = 2;
-            if (value > 20) value = 20;
-            this.value = value;
+        // Mistake rate input + slider (rate mode) — bidirectional sync
+        const mistakeRateInput  = document.getElementById('mistake-rate-input');
+        const mistakeRateSlider = document.getElementById('mistake-rate-slider');
+        function applyMistakeRate(value) {
+            value = Math.max(2, Math.min(20, parseInt(value) || 2));
             config.mistakeRate = value;
             localStorage.setItem('katip-mistake-rate', value);
-        };
-
-        // Mistake chance input (chance mode)
-        const mistakeChanceInput = document.getElementById('mistake-chance-input');
-        if (mistakeChanceInput) {
-            mistakeChanceInput.oninput = function() {
-                let value = parseInt(this.value);
-                if (isNaN(value) || value < 1) value = 1;
-                if (value > 100) value = 100;
-                this.value = value;
-                config.mistakeChance = value;
-                localStorage.setItem('katip-mistake-chance', value);
-            };
+            if (mistakeRateInput)  mistakeRateInput.value  = value;
+            if (mistakeRateSlider) mistakeRateSlider.value = value;
+            updateMistakeChart();
         }
+        if (mistakeRateInput)  mistakeRateInput.oninput  = function() { applyMistakeRate(this.value); };
+        if (mistakeRateSlider) mistakeRateSlider.oninput = function() { applyMistakeRate(this.value); };
+
+        // Mistake chance input + slider (chance mode) — bidirectional sync
+        const mistakeChanceInput  = document.getElementById('mistake-chance-input');
+        const mistakeChanceSlider = document.getElementById('mistake-chance-slider');
+        function applyMistakeChance(value) {
+            value = Math.max(1, Math.min(100, parseInt(value) || 1));
+            config.mistakeChance = value;
+            localStorage.setItem('katip-mistake-chance', value);
+            if (mistakeChanceInput)  mistakeChanceInput.value  = value;
+            if (mistakeChanceSlider) mistakeChanceSlider.value = value;
+            updateMistakeChart();
+        }
+        if (mistakeChanceInput)  mistakeChanceInput.oninput  = function() { applyMistakeChance(this.value); };
+        if (mistakeChanceSlider) mistakeChanceSlider.oninput = function() { applyMistakeChance(this.value); };
 
         // Correction chance input (both modes)
         const mistakeClearChanceInput = document.getElementById('mistake-clear-chance-input');
@@ -1681,6 +1736,7 @@
                 this.value = value;
                 config.mistakeClearChance = value;
                 localStorage.setItem('katip-mistake-clear-chance', value);
+                updateMistakeChart();
             };
         }
 
@@ -1928,12 +1984,42 @@
                 -moz-appearance: textfield;
             }
             #mistake-rate-input::-webkit-outer-spin-button,
-            #mistake-rate-input::-webkit-inner-spin-button {
+            #mistake-rate-input::-webkit-inner-spin-button,
+            #mistake-chance-input::-webkit-outer-spin-button,
+            #mistake-chance-input::-webkit-inner-spin-button {
                 -webkit-appearance: none;
                 margin: 0;
             }
-            #mistake-rate-input[type=number] {
+            #mistake-rate-input[type=number],
+            #mistake-chance-input[type=number] {
                 -moz-appearance: textfield;
+            }
+            #mistake-rate-slider::-webkit-slider-thumb,
+            #mistake-chance-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: #ff453a;
+                cursor: pointer;
+                box-shadow: 0 2px 6px rgba(255,69,58,0.4);
+                transition: all 0.2s;
+            }
+            #mistake-rate-slider::-webkit-slider-thumb:hover,
+            #mistake-chance-slider::-webkit-slider-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 10px rgba(255,69,58,0.6);
+            }
+            #mistake-rate-slider::-moz-range-thumb,
+            #mistake-chance-slider::-moz-range-thumb {
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: #ff453a;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 2px 6px rgba(255,69,58,0.4);
             }
             #mistake-mode {
                 -webkit-appearance: none;
