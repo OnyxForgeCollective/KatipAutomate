@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.3
+// @version      v2.4
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -42,7 +42,12 @@
         estimatedWPM: 0,
         updateInterval: null,
         lastWord: '',
-        lastWordCorrect: true
+        lastWordCorrect: true,
+        // Mistake analytics
+        mistakeHistory: [],    // {word, mistakeType, corrected, timestamp} - last 50
+        wordHistory: [],       // {word, hadMistake, mistakeType, corrected} - last 30
+        totalMistakes: 0,
+        correctedMistakes: 0,
     };
 
     const logger = (msg, type = 'info') => {
@@ -119,7 +124,14 @@
         'w': ['q', 'e', 's'],
         'x': ['z', 'c', 's'],
         'y': ['t', 'u', 'h'],
-        'z': ['a', 'x']
+        'z': ['a', 'x'],
+        // Turkish keyboard characters
+        'ş': ['s', 'z', 'a'],
+        'ğ': ['g', 'f', 'h'],
+        'ü': ['u', 'i', 'y'],
+        'ö': ['o', 'p', 'l'],
+        'ç': ['c', 'x', 'v'],
+        'ı': ['i', 'u', 'o'],
     };
 
     function generateTypo(char) {
@@ -131,57 +143,164 @@
         return char === char.toUpperCase() ? typo.toUpperCase() : typo;
     }
 
-    async function typeWithMistake(element, word) {
-        // Select random character position (not first or last)
-        const mistakePos = Math.floor(Math.random() * (word.length - 2)) + 1;
-        
-        // Type up to mistake position
-        for (let i = 0; i < mistakePos; i++) {
+    function getMistakeType() {
+        // Weights: typo most frequent, then double, transposition, skip
+        const types = ['typo', 'typo', 'typo', 'double', 'transposition', 'skip'];
+        return types[Math.floor(Math.random() * types.length)];
+    }
+
+    async function doTypoMistake(element, word, pos) {
+        for (let i = 0; i < pos; i++) {
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
-        
-        // Type the typo
-        const typo = generateTypo(word[mistakePos]);
+        const typo = generateTypo(word[pos]);
         simulateKey(element, typo);
         await sleep(getHumanLikeDelay());
-        
-        // Decide: correct it or leave it based on mistakeClearChance
         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-        
         if (shouldCorrect) {
-            // Pause briefly (noticing the mistake)
             await sleep(200 + Math.random() * 300);
-            
-            // Backspace multiple times based on mistakeDeleteCount
             const deleteCount = config.mistakeDeleteCount || 1;
             for (let i = 0; i < deleteCount; i++) {
                 simulateBackspace(element);
                 await sleep(getHumanLikeDelay());
             }
-            
-            // Type correct characters back if mistakeRewriteCorrect is enabled
             if (config.mistakeRewriteCorrect) {
-                // If we deleted more than the typo, we need to retype from earlier
-                const startPos = Math.max(0, mistakePos - deleteCount + 1);
-                for (let i = startPos; i <= mistakePos; i++) {
+                const startPos = Math.max(0, pos - deleteCount + 1);
+                for (let i = startPos; i <= pos; i++) {
                     simulateKey(element, word[i]);
                     await sleep(getHumanLikeDelay());
                 }
             } else {
-                // Just type the correct character
-                simulateKey(element, word[mistakePos]);
+                simulateKey(element, word[pos]);
                 await sleep(getHumanLikeDelay());
             }
         }
-        
-        // Type rest of the word
-        for (let i = mistakePos + 1; i < word.length; i++) {
+        for (let i = pos + 1; i < word.length; i++) {
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
-        
         return shouldCorrect;
+    }
+
+    async function doTranspositionMistake(element, word, pos) {
+        // Type chars before pos
+        for (let i = 0; i < pos; i++) {
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        // Swap: type word[pos+1] before word[pos]
+        simulateKey(element, word[pos + 1]);
+        await sleep(getHumanLikeDelay());
+        simulateKey(element, word[pos]);
+        await sleep(getHumanLikeDelay());
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+        if (shouldCorrect) {
+            await sleep(150 + Math.random() * 200);
+            simulateBackspace(element);
+            await sleep(getHumanLikeDelay());
+            simulateBackspace(element);
+            await sleep(getHumanLikeDelay());
+            simulateKey(element, word[pos]);
+            await sleep(getHumanLikeDelay());
+            simulateKey(element, word[pos + 1]);
+            await sleep(getHumanLikeDelay());
+        }
+        for (let i = pos + 2; i < word.length; i++) {
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        return shouldCorrect;
+    }
+
+    async function doDoubleMistake(element, word, pos) {
+        // Type word[0..pos] normally
+        for (let i = 0; i <= pos; i++) {
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        // Type word[pos] a second time (double-key)
+        simulateKey(element, word[pos]);
+        await sleep(getHumanLikeDelay());
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+        if (shouldCorrect) {
+            await sleep(150 + Math.random() * 200);
+            simulateBackspace(element);
+            await sleep(getHumanLikeDelay());
+        }
+        for (let i = pos + 1; i < word.length; i++) {
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        return shouldCorrect;
+    }
+
+    async function doSkipMistake(element, word, pos) {
+        // Type chars before pos
+        for (let i = 0; i < pos; i++) {
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+        if (pos + 1 < word.length) {
+            // Accidentally type word[pos+1] first (skip pos)
+            simulateKey(element, word[pos + 1]);
+            await sleep(getHumanLikeDelay());
+            if (shouldCorrect) {
+                await sleep(150 + Math.random() * 200);
+                simulateBackspace(element);
+                await sleep(getHumanLikeDelay());
+                // Insert the skipped char, then re-type the one we just backspaced
+                simulateKey(element, word[pos]);
+                await sleep(getHumanLikeDelay());
+                simulateKey(element, word[pos + 1]);
+                await sleep(getHumanLikeDelay());
+                for (let i = pos + 2; i < word.length; i++) {
+                    simulateKey(element, word[i]);
+                    await sleep(getHumanLikeDelay());
+                }
+            } else {
+                for (let i = pos + 2; i < word.length; i++) {
+                    simulateKey(element, word[i]);
+                    await sleep(getHumanLikeDelay());
+                }
+            }
+        } else {
+            // pos is last char; just skip it (uncorrectable edge case)
+        }
+        return shouldCorrect;
+    }
+
+    async function typeWithMistake(element, word) {
+        // Words shorter than 3 chars are too short to make meaningful mistakes in
+        if (word.length < 3) {
+            for (let i = 0; i < word.length; i++) {
+                simulateKey(element, word[i]);
+                await sleep(getHumanLikeDelay());
+            }
+            return true;
+        }
+
+        const rawType = getMistakeType();
+        const pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+        // transposition needs pos+1 to be in-bounds; fall back to typo if not
+        const mistakeType = (rawType === 'transposition' && pos + 1 >= word.length) ? 'typo' : rawType;
+
+        let corrected;
+        switch (mistakeType) {
+            case 'transposition': corrected = await doTranspositionMistake(element, word, pos); break;
+            case 'double':        corrected = await doDoubleMistake(element, word, pos);        break;
+            case 'skip':          corrected = await doSkipMistake(element, word, pos);          break;
+            default:              corrected = await doTypoMistake(element, word, pos);          break;
+        }
+
+        // Record the mistake
+        stats.totalMistakes++;
+        if (corrected) stats.correctedMistakes++;
+        stats.mistakeHistory.push({ word, mistakeType, corrected, timestamp: Date.now() });
+        if (stats.mistakeHistory.length > 50) stats.mistakeHistory.shift();
+
+        return corrected;
     }
 
     function simulateBackspace(element) {
@@ -218,7 +337,106 @@
 
     // --- İSTATİSTİK FONKSİYONLARI ---
     let lastCharWasSpace = true; // Start as true so first word counts properly
-    
+
+    // --- HATA ANALİZİ YARDIMCILARI ---
+    function getMistakeTypeName(type) {
+        const names = {
+            'typo':          'yanlış tuş',
+            'transposition': 'harf yer değiştirme',
+            'double':        'çift harf',
+            'skip':          'harf atlama',
+        };
+        return names[type] || type;
+    }
+
+    function generateMistakeInsight() {
+        const history = stats.wordHistory;
+        if (history.length === 0) {
+            return '<em>Bot başlatıldığında hata analizi burada görünecek.</em>';
+        }
+        const recent = history.slice(-10);
+        const recentMistakes = recent.filter(w => w.hadMistake);
+        const mistakeRate = recent.length > 0 ? recentMistakes.length / recent.length : 0;
+
+        if (recentMistakes.length === 0) {
+            return `✅ Son ${recent.length} kelimede hiç hata yok. Harika performans!`;
+        }
+
+        // Most common mistake type in recent history
+        const typeCounts = {};
+        stats.mistakeHistory.slice(-20).forEach(m => {
+            typeCounts[m.mistakeType] = (typeCounts[m.mistakeType] || 0) + 1;
+        });
+        const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
+        const correctionRate = stats.totalMistakes > 0
+            ? Math.round(stats.correctedMistakes / stats.totalMistakes * 100)
+            : 0;
+
+        const sev = mistakeRate < 0.15 ? '💛' : mistakeRate < 0.35 ? '🟠' : '🔴';
+        let text = `${sev} Son ${recent.length} kelimede <strong>${recentMistakes.length} hata</strong> (%${Math.round(mistakeRate * 100)}). `;
+        if (topType) {
+            text += `En sık: <strong>${getMistakeTypeName(topType[0])}</strong>. `;
+        }
+        if (stats.totalMistakes > 0) {
+            text += `Düzeltme oranı: <strong>%${correctionRate}</strong>.`;
+        }
+        // Next-mistake prediction
+        if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
+            const wordsToNext = config.mistakeRate - (stats.totalWords % config.mistakeRate);
+            if (wordsToNext <= 2) {
+                text += ` ⚡ <strong>Hata bekleniyor!</strong>`;
+            } else {
+                text += ` Sonraki hata tahmini: <strong>${wordsToNext} kelime sonra</strong>.`;
+            }
+        } else if (config.mistakeMode === 'custom') {
+            text += ` Her kelimede <strong>%${config.mistakeChance}</strong> hata olasılığı.`;
+        }
+        return text;
+    }
+
+    function updateMistakeChart() {
+        const barsEl      = document.getElementById('mistake-bars');
+        const assistantEl = document.getElementById('mistake-assistant');
+        const totalEl     = document.getElementById('mistake-total-count');
+        const correctedEl = document.getElementById('mistake-corrected-count');
+        const nextPredEl  = document.getElementById('mistake-next-pred');
+
+        if (!barsEl) return;
+
+        if (totalEl)    totalEl.innerText    = stats.totalMistakes;
+        if (correctedEl) correctedEl.innerText = stats.correctedMistakes;
+        if (nextPredEl) {
+            if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
+                const n = config.mistakeRate - (stats.totalWords % config.mistakeRate);
+                nextPredEl.innerText = n + ' kelime';
+            } else if (config.mistakeMode === 'custom') {
+                nextPredEl.innerText = '%' + config.mistakeChance;
+            } else {
+                nextPredEl.innerText = '—';
+            }
+        }
+
+        const history = stats.wordHistory;
+        if (history.length === 0) {
+            barsEl.innerHTML = '<span style="font-size:9px; color:rgba(255,255,255,0.25); align-self:center; width:100%; text-align:center;">Henüz kelime yok</span>';
+        } else {
+            barsEl.innerHTML = history.map((entry, i) => {
+                const color = !entry.hadMistake ? '#30d158'
+                            : entry.corrected   ? '#ff9f0a'
+                            :                     '#ff453a';
+                const isLast = i === history.length - 1;
+                const title = entry.hadMistake
+                    ? `"${entry.word}" - ${getMistakeTypeName(entry.mistakeType)} (${entry.corrected ? 'düzeltildi' : 'düzeltilmedi'})`
+                    : `"${entry.word}" - doğru`;
+                return `<div title="${title}" style="flex:1; min-width:6px; max-width:18px; height:100%; background:${color}; border-radius:3px 3px 0 0; opacity:${isLast ? '1' : '0.65'}; transition:opacity 0.3s;"></div>`;
+            }).join('');
+        }
+
+        if (assistantEl) {
+            assistantEl.innerHTML = '🤖 ' + generateMistakeInsight();
+        }
+    }
+
     function updateStats(char) {
         stats.totalChars++;
         
@@ -250,6 +468,11 @@
         stats.currentWPM = 0;
         stats.estimatedWPM = calculateEstimatedWPM();
         lastCharWasSpace = true; // Reset word boundary tracking
+        // Reset mistake analytics
+        stats.mistakeHistory = [];
+        stats.wordHistory = [];
+        stats.totalMistakes = 0;
+        stats.correctedMistakes = 0;
 
         // Her saniye istatistikleri güncelle
         if (stats.updateInterval) clearInterval(stats.updateInterval);
@@ -420,6 +643,9 @@
             lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
             lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
         }
+
+        // Refresh mistake chart while stats panel is open
+        updateMistakeChart();
     }
 
     // --- ELEMENT BULUCU (HTML Analizi) ---
@@ -510,9 +736,17 @@
         input.focus();
 
         logger('Düello Döngüsü başlıyor...');
-        
+
+        // Resume: pre-initialise wordCount from already-typed content
         let wordCount = 0;
+        if (input.value) {
+            const typedWords = input.value.trim().split(/\s+/).filter(Boolean);
+            // If the last char is a non-space, that word is still in progress
+            wordCount = /\s$/.test(input.value) ? typedWords.length : Math.max(0, typedWords.length - 1);
+        }
         let currentWord = '';
+        let currentWordHadMistake = false;
+        let currentWordMistakeType = null;
 
         while (config.active) {
             const sourceText = source.value;
@@ -536,6 +770,16 @@
             
             // Handle word-based mistakes
             if (isSpace && currentWord.length > 0) {
+                // Track the completed word for the chart
+                stats.wordHistory.push({
+                    word: currentWord,
+                    hadMistake: currentWordHadMistake,
+                    mistakeType: currentWordMistakeType,
+                    corrected: false,
+                });
+                if (stats.wordHistory.length > 30) stats.wordHistory.shift();
+                currentWordHadMistake = false;
+                currentWordMistakeType = null;
                 wordCount++;
                 currentWord = '';
             } else if (!isSpace) {
@@ -555,8 +799,19 @@
                     if (remainingWord.length > 2) {
                         logger(`Making mistake on word: ${remainingWord}`);
                         await typeWithMistake(input, remainingWord);
+                        // Track the mistake word
+                        const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
+                        stats.wordHistory.push({
+                            word: remainingWord,
+                            hadMistake: true,
+                            mistakeType: lastM ? lastM.mistakeType : 'typo',
+                            corrected: lastM ? lastM.corrected : false,
+                        });
+                        if (stats.wordHistory.length > 30) stats.wordHistory.shift();
                         wordCount++;
                         currentWord = '';
+                        currentWordHadMistake = false;
+                        currentWordMistakeType = null;
                         continue;
                     }
                 }
@@ -581,6 +836,9 @@
         input.removeAttribute('disabled');
         input.focus();
 
+        // On the very first section, skip spans that were already typed (resume support)
+        let firstIteration = true;
+
         // Outer loop: re-runs each time the lesson content refreshes (new section loaded)
         while (config.active) {
             const spans = Array.from(source.querySelectorAll('span'));
@@ -591,11 +849,18 @@
                 continue;
             }
 
+            // Resume: on first run, skip spans already covered by existing input
+            const startIndex = firstIteration ? Math.min(input.value.length, spans.length) : 0;
+            firstIteration = false;
+
+            if (startIndex > 0) {
+                logger(`Ders modu: ${startIndex} karakter atlandı (kaldığı yerden devam).`);
+            }
             logger(`Ders modu: ${spans.length} karakter bulundu.`);
 
             let contentChanged = false;
 
-            for (let i = 0; i < spans.length; i++) {
+            for (let i = startIndex; i < spans.length; i++) {
                 if (!config.active) break;
 
                 // Detect if the source content changed mid-typing (span removed from DOM)
@@ -689,7 +954,8 @@
             }
             
             let wordWasCorrect = true;
-            if (shouldMakeMistake && (config.mistakeMode === 'advanced' || config.mistakeMode === 'custom')) {
+            const hadActualMistake = shouldMakeMistake && (config.mistakeMode === 'advanced' || config.mistakeMode === 'custom');
+            if (hadActualMistake) {
                 wordWasCorrect = await typeWithMistake(input, wordToType);
             } else {
                 for (let i = 0; i < wordToType.length; i++) {
@@ -699,6 +965,16 @@
                     await sleep(delay);
                 }
             }
+
+            // Track word in history for mistake chart
+            const lastM = hadActualMistake ? stats.mistakeHistory[stats.mistakeHistory.length - 1] : null;
+            stats.wordHistory.push({
+                word: wordToType,
+                hadMistake: hadActualMistake,
+                mistakeType: lastM ? lastM.mistakeType : null,
+                corrected: hadActualMistake ? wordWasCorrect : false,
+            });
+            if (stats.wordHistory.length > 30) stats.wordHistory.shift();
 
             // Track last word and whether it was correct
             stats.lastWord = wordToType;
@@ -1016,6 +1292,46 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Mistake Analysis Section -->
+                <div id="mistake-analysis-section" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'}; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;">
+                    <!-- Header row -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:11px; font-weight:600; color:rgba(255,255,255,0.7);">📊 Hata Analizi</span>
+                        <div style="display:flex; gap:10px; font-size:10px; color:rgba(255,255,255,0.5);">
+                            <span>Toplam: <b id="mistake-total-count" style="color:#ff453a;">0</b></span>
+                            <span>Düzeltilen: <b id="mistake-corrected-count" style="color:#30d158;">0</b></span>
+                            <span>Sonraki: <b id="mistake-next-pred" style="color:#ffd60a;">—</b></span>
+                        </div>
+                    </div>
+                    <!-- Bar Chart -->
+                    <div style="background:rgba(255,255,255,0.03); border-radius:8px; padding:8px; border:1px solid rgba(255,255,255,0.06); margin-bottom:8px;">
+                        <div id="mistake-bars" style="display:flex; gap:3px; height:40px; align-items:flex-end; overflow:hidden;">
+                            <span style="font-size:9px; color:rgba(255,255,255,0.25); align-self:center; width:100%; text-align:center;">Henüz kelime yok</span>
+                        </div>
+                        <div style="display:flex; gap:12px; margin-top:5px;">
+                            <div style="display:flex; align-items:center; gap:3px;">
+                                <div style="width:8px; height:8px; background:#30d158; border-radius:2px;"></div>
+                                <span style="font-size:8px; color:rgba(255,255,255,0.4);">Doğru</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:3px;">
+                                <div style="width:8px; height:8px; background:#ff9f0a; border-radius:2px;"></div>
+                                <span style="font-size:8px; color:rgba(255,255,255,0.4);">Düzeltildi</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:3px;">
+                                <div style="width:8px; height:8px; background:#ff453a; border-radius:2px;"></div>
+                                <span style="font-size:8px; color:rgba(255,255,255,0.4);">Hatalı bırakıldı</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:3px; margin-left:auto; font-size:8px; color:rgba(255,255,255,0.3);">
+                                Y: yanlış tuş &nbsp;|&nbsp; YD: yer değ. &nbsp;|&nbsp; ÇH: çift harf &nbsp;|&nbsp; HA: harf atl.
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Assistant Text -->
+                    <div id="mistake-assistant" style="background:rgba(0,122,255,0.08); border:1px solid rgba(0,122,255,0.15); border-radius:8px; padding:8px 10px; font-size:11px; color:rgba(255,255,255,0.75); line-height:1.5;">
+                        🤖 <em>Bot başlatıldığında hata analizi burada görünecek.</em>
+                    </div>
+                </div>
             </div>
         `;
 
@@ -1317,8 +1633,10 @@
             const controls = document.getElementById('mistake-controls');
             const rateControl = document.getElementById('mistake-rate-control');
             const chanceControl = document.getElementById('mistake-chance-control');
+            const analysisSection = document.getElementById('mistake-analysis-section');
             
             controls.style.display = this.value !== 'none' ? 'block' : 'none';
+            if (analysisSection) analysisSection.style.display = this.value !== 'none' ? 'block' : 'none';
             
             if (this.value === 'basic' || this.value === 'advanced') {
                 rateControl.style.display = 'block';
@@ -1328,6 +1646,8 @@
                 chanceControl.style.display = 'block';
             }
             
+            // Refresh chart when mode changes
+            updateMistakeChart();
             logger(`Hata modu: ${this.value}`);
         };
         
