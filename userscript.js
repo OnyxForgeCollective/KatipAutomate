@@ -53,7 +53,24 @@
         else console.log(prefix + msg);
     };
 
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    // Use MessageChannel instead of setTimeout so timing works in background tabs
+    // (Chrome throttles setTimeout to >=1000ms in background; MessageChannel is not throttled)
+    const sleep = (ms) => {
+        if (ms <= 0) return Promise.resolve();
+        return new Promise(resolve => {
+            const channel = new MessageChannel();
+            const deadline = performance.now() + ms;
+            function tick() {
+                if (performance.now() >= deadline) {
+                    resolve();
+                } else {
+                    channel.port2.postMessage(null);
+                }
+            }
+            channel.port1.onmessage = tick;
+            channel.port2.postMessage(null);
+        });
+    };
 
     // --- HUMAN-LIKE TYPING FUNCTIONS ---
     function getHumanLikeDelay() {
@@ -419,8 +436,8 @@
             return { source: sourceEl, input: inputEl, type: 'textarea' };
         }
 
-        // 2. KELİME ÇALIŞMASI
-        const lessonSource = document.querySelector('#qklavyemetni');
+        // 2. F/Q KELİME ÇALIŞMASI (F veya Q klavye ders modu)
+        const lessonSource = document.querySelector('#fklavyemetni, #qklavyemetni');
         const lessonInput = document.querySelector('#yazialani');
 
         if (lessonSource && lessonInput) {
@@ -564,26 +581,72 @@
         input.removeAttribute('disabled');
         input.focus();
 
-        const spans = Array.from(source.querySelectorAll('span'));
-        logger(`Ders modu: ${spans.length} karakter bulundu.`);
+        // Outer loop: re-runs each time the lesson content refreshes (new section loaded)
+        while (config.active) {
+            const spans = Array.from(source.querySelectorAll('span'));
 
-        for (let i = 0; i < spans.length; i++) {
+            if (spans.length === 0) {
+                logger('Ders içeriği bekleniyor...', 'warn');
+                await sleep(200);
+                continue;
+            }
+
+            logger(`Ders modu: ${spans.length} karakter bulundu.`);
+
+            let contentChanged = false;
+
+            for (let i = 0; i < spans.length; i++) {
+                if (!config.active) break;
+
+                // Detect if the source content changed mid-typing (span removed from DOM)
+                if (!source.contains(spans[i])) {
+                    contentChanged = true;
+                    logger('Ders içeriği değişti, yeniden okunuyor...');
+                    break;
+                }
+
+                let charToType = spans[i].textContent;
+                if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
+
+                simulateKey(input, charToType);
+                if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
+
+                const delay = getHumanLikeDelay();
+                await sleep(delay);
+
+                if (shouldAddRandomPause()) {
+                    await sleep(getRandomPauseDelay());
+                }
+            }
+
             if (!config.active) break;
 
-            let charToType = spans[i].textContent;
-            if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
+            if (!contentChanged) {
+                // All spans typed — wait for the next section to load
+                logger('Bölüm tamamlandı, yeni içerik bekleniyor...');
+                const firstSpanText = spans[0].textContent;
+                const spanCount = spans.length;
 
-            simulateKey(input, charToType);
-            if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
+                let waited = 0;
+                const maxWait = 10000;
+                while (config.active && waited < maxWait) {
+                    await sleep(150);
+                    waited += 150;
+                    const newSpans = source.querySelectorAll('span');
+                    if (newSpans.length !== spanCount ||
+                        (newSpans.length > 0 && newSpans[0].textContent !== firstSpanText)) {
+                        logger('Yeni ders içeriği algılandı!');
+                        break;
+                    }
+                }
 
-            const delay = getHumanLikeDelay();
-            await sleep(delay);
-            
-            if (shouldAddRandomPause()) {
-                await sleep(getRandomPauseDelay());
+                if (waited >= maxWait) {
+                    logger('Yeni içerik bulunamadı, bot durduruluyor.');
+                    stopBot();
+                    break;
+                }
             }
         }
-        stopBot();
     }
 
     // --- DÖNGÜ (HIZ TESTİ) ---
