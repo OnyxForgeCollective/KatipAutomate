@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.3
+// @version      v2.7
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -16,21 +16,31 @@
     'use strict';
 
     // --- AYARLAR ---
+    // Migrate old mistake mode values from previous versions
+    (function migrateOldMistakeMode() {
+        const old = localStorage.getItem('katip-mistake-mode');
+        if (old === 'basic' || old === 'advanced') localStorage.setItem('katip-mistake-mode', 'rate');
+        else if (old === 'custom') localStorage.setItem('katip-mistake-mode', 'chance');
+    })();
+
     const config = {
         active: false,
-        delay: parseInt(localStorage.getItem('katip-speed')) || 120, // İki harf arası bekleme süresi (ms)
-        debug: true, // Konsolda detaylı hata ayıklama görmek için true
-        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true', // Panel başlangıç durumu
-        wordLimitEnabled: localStorage.getItem('katip-word-limit-enabled') === 'true', // Kelime limiti aktif mi
-        wordLimit: parseInt(localStorage.getItem('katip-word-limit')) || 50, // Kaç kelime yazılacak
-        infoExpanded: false, // Info panel durumu
-        mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none', // none, basic, advanced, custom
-        mistakeRate: parseInt(localStorage.getItem('katip-mistake-rate')) || 3, // Her kaç kelimede bir hata
-        mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 50, // Hata yapma şansı (%)
-        mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 1, // Hatadan sonra kaç kere silme
-        mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70, // Temizleme ihtimali (%)
-        mistakeRewriteCorrect: localStorage.getItem('katip-mistake-rewrite') !== 'false', // Hatadan sonra doğru kelimeyi yazma (default: true)
-        humanLikeTyping: localStorage.getItem('katip-human-like') === 'true' // İnsan gibi yazma modu
+        delay: parseInt(localStorage.getItem('katip-speed')) || 120,
+        debug: true,
+        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true',
+        wordLimitEnabled: localStorage.getItem('katip-word-limit-enabled') === 'true',
+        wordLimit: parseInt(localStorage.getItem('katip-word-limit')) || 50,
+        infoExpanded: false,
+        humanLikeTyping: localStorage.getItem('katip-human-like') === 'true',
+        // --- Hata Sistemi ---
+        // mistakeMode: 'none' | 'rate' | 'chance'
+        //   rate   → her mistakeRate kelimede bir hata
+        //   chance → her kelimede mistakeChance% ihtimalle hata
+        mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none',
+        mistakeRate: parseInt(localStorage.getItem('katip-mistake-rate')) || 5,
+        mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 30,
+        mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70,
+        mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 1,
     };
 
     // --- İSTATİSTİKLER ---
@@ -42,7 +52,13 @@
         estimatedWPM: 0,
         updateInterval: null,
         lastWord: '',
-        lastWordCorrect: true
+        lastWordCorrect: true,
+        // Mistake analytics
+        mistakeHistory: [],    // {word, mistakeType, corrected, timestamp} - last 50
+        wordHistory: [],       // {word, hadMistake, mistakeType, corrected} - last 30
+        totalMistakes: 0,
+        correctedMistakes: 0,
+        mistakeWordCount: 0,   // completed-word count used by shouldMakeMistake
     };
 
     const logger = (msg, type = 'info') => {
@@ -53,7 +69,24 @@
         else console.log(prefix + msg);
     };
 
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    // Use MessageChannel instead of setTimeout so timing works in background tabs
+    // (Chrome throttles setTimeout to >=1000ms in background; MessageChannel is not throttled)
+    const sleep = (ms) => {
+        if (ms <= 0) return Promise.resolve();
+        return new Promise(resolve => {
+            const channel = new MessageChannel();
+            const deadline = performance.now() + ms;
+            function tick() {
+                if (performance.now() >= deadline) {
+                    resolve();
+                } else {
+                    channel.port2.postMessage(null);
+                }
+            }
+            channel.port1.onmessage = tick;
+            channel.port2.postMessage(null);
+        });
+    };
 
     // --- HUMAN-LIKE TYPING FUNCTIONS ---
     function getHumanLikeDelay() {
@@ -102,7 +135,14 @@
         'w': ['q', 'e', 's'],
         'x': ['z', 'c', 's'],
         'y': ['t', 'u', 'h'],
-        'z': ['a', 'x']
+        'z': ['a', 'x'],
+        // Turkish keyboard characters
+        'ş': ['s', 'z', 'a'],
+        'ğ': ['g', 'f', 'h'],
+        'ü': ['u', 'i', 'y'],
+        'ö': ['o', 'p', 'l'],
+        'ç': ['c', 'x', 'v'],
+        'ı': ['i', 'u', 'o'],
     };
 
     function generateTypo(char) {
@@ -114,57 +154,205 @@
         return char === char.toUpperCase() ? typo.toUpperCase() : typo;
     }
 
-    async function typeWithMistake(element, word) {
-        // Select random character position (not first or last)
-        const mistakePos = Math.floor(Math.random() * (word.length - 2)) + 1;
-        
-        // Type up to mistake position
-        for (let i = 0; i < mistakePos; i++) {
+    function getMistakeType() {
+        // Weights: typo most frequent, then double, transposition, skip
+        const types = ['typo', 'typo', 'typo', 'double', 'transposition', 'skip'];
+        return types[Math.floor(Math.random() * types.length)];
+    }
+
+    // Minimum word length needed to attempt a meaningful mistake
+    const MIN_WORD_LEN_FOR_MISTAKE = 3;
+
+    /**
+     * Central mistake-trigger decision.
+     * @param {number} wordCount  – number of fully-completed words so far
+     * @returns {boolean}
+     */
+    function shouldMakeMistake(wordCount) {
+        if (config.mistakeMode === 'rate') {
+            // Trigger on word number (wordCount+1); e.g. rate=5 → words 5,10,15…
+            return (wordCount + 1) % config.mistakeRate === 0;
+        }
+        if (config.mistakeMode === 'chance') {
+            // Each word has an independent mistakeChance% probability
+            return Math.random() * 100 < config.mistakeChance;
+        }
+        return false;
+    }
+
+    async function doTypoMistake(element, word, pos) {
+        for (let i = 0; i < pos; i++) {
+            if (!config.active) return true;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
-        
-        // Type the typo
-        const typo = generateTypo(word[mistakePos]);
+        if (!config.active) return true;
+        const typo = generateTypo(word[pos]);
         simulateKey(element, typo);
         await sleep(getHumanLikeDelay());
-        
-        // Decide: correct it or leave it based on mistakeClearChance
         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-        
         if (shouldCorrect) {
-            // Pause briefly (noticing the mistake)
+            // Notice the mistake, then backspace and retype
             await sleep(200 + Math.random() * 300);
-            
-            // Backspace multiple times based on mistakeDeleteCount
-            const deleteCount = config.mistakeDeleteCount || 1;
+            const deleteCount = Math.min(config.mistakeDeleteCount, pos + 1);
             for (let i = 0; i < deleteCount; i++) {
+                if (!config.active) return shouldCorrect;
                 simulateBackspace(element);
                 await sleep(getHumanLikeDelay());
             }
-            
-            // Type correct characters back if mistakeRewriteCorrect is enabled
-            if (config.mistakeRewriteCorrect) {
-                // If we deleted more than the typo, we need to retype from earlier
-                const startPos = Math.max(0, mistakePos - deleteCount + 1);
-                for (let i = startPos; i <= mistakePos; i++) {
+            // Retype the characters we deleted
+            const startPos = Math.max(0, pos - deleteCount + 1);
+            for (let i = startPos; i <= pos; i++) {
+                if (!config.active) return shouldCorrect;
+                simulateKey(element, word[i]);
+                await sleep(getHumanLikeDelay());
+            }
+        }
+        for (let i = pos + 1; i < word.length; i++) {
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        return shouldCorrect;
+    }
+
+    async function doTranspositionMistake(element, word, pos) {
+        // Type chars before pos
+        for (let i = 0; i < pos; i++) {
+            if (!config.active) return true;
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        // Swap: type word[pos+1] before word[pos]
+        if (!config.active) return true;
+        simulateKey(element, word[pos + 1]);
+        await sleep(getHumanLikeDelay());
+        if (!config.active) return true;
+        simulateKey(element, word[pos]);
+        await sleep(getHumanLikeDelay());
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+        if (shouldCorrect) {
+            await sleep(150 + Math.random() * 200);
+            if (!config.active) return shouldCorrect;
+            simulateBackspace(element);
+            await sleep(getHumanLikeDelay());
+            if (!config.active) return shouldCorrect;
+            simulateBackspace(element);
+            await sleep(getHumanLikeDelay());
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[pos]);
+            await sleep(getHumanLikeDelay());
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[pos + 1]);
+            await sleep(getHumanLikeDelay());
+        }
+        for (let i = pos + 2; i < word.length; i++) {
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        return shouldCorrect;
+    }
+
+    async function doDoubleMistake(element, word, pos) {
+        // Type word[0..pos] normally
+        for (let i = 0; i <= pos; i++) {
+            if (!config.active) return true;
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        // Type word[pos] a second time (double-key)
+        if (!config.active) return true;
+        simulateKey(element, word[pos]);
+        await sleep(getHumanLikeDelay());
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+        if (shouldCorrect) {
+            await sleep(150 + Math.random() * 200);
+            if (!config.active) return shouldCorrect;
+            simulateBackspace(element);
+            await sleep(getHumanLikeDelay());
+        }
+        for (let i = pos + 1; i < word.length; i++) {
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        return shouldCorrect;
+    }
+
+    async function doSkipMistake(element, word, pos) {
+        // Type chars before pos
+        for (let i = 0; i < pos; i++) {
+            if (!config.active) return true;
+            simulateKey(element, word[i]);
+            await sleep(getHumanLikeDelay());
+        }
+        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+        if (pos + 1 < word.length) {
+            // Accidentally type word[pos+1] first (skip pos)
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[pos + 1]);
+            await sleep(getHumanLikeDelay());
+            if (shouldCorrect) {
+                await sleep(150 + Math.random() * 200);
+                if (!config.active) return shouldCorrect;
+                simulateBackspace(element);
+                await sleep(getHumanLikeDelay());
+                // Insert the skipped char, then re-type the one we just backspaced
+                if (!config.active) return shouldCorrect;
+                simulateKey(element, word[pos]);
+                await sleep(getHumanLikeDelay());
+                if (!config.active) return shouldCorrect;
+                simulateKey(element, word[pos + 1]);
+                await sleep(getHumanLikeDelay());
+                for (let i = pos + 2; i < word.length; i++) {
+                    if (!config.active) return shouldCorrect;
                     simulateKey(element, word[i]);
                     await sleep(getHumanLikeDelay());
                 }
             } else {
-                // Just type the correct character
-                simulateKey(element, word[mistakePos]);
+                for (let i = pos + 2; i < word.length; i++) {
+                    if (!config.active) return shouldCorrect;
+                    simulateKey(element, word[i]);
+                    await sleep(getHumanLikeDelay());
+                }
+            }
+        } else {
+            // pos is last char; just skip it (uncorrectable edge case)
+        }
+        return shouldCorrect;
+    }
+
+    async function typeWithMistake(element, word) {
+        // Don't attempt mistakes on very short words
+        if (word.length < MIN_WORD_LEN_FOR_MISTAKE) {
+            for (let i = 0; i < word.length; i++) {
+                simulateKey(element, word[i]);
                 await sleep(getHumanLikeDelay());
             }
+            return true;
         }
-        
-        // Type rest of the word
-        for (let i = mistakePos + 1; i < word.length; i++) {
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
+
+        const rawType = getMistakeType();
+        const pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+        // transposition needs pos+1 to be in-bounds; fall back to typo if not
+        const mistakeType = (rawType === 'transposition' && pos + 1 >= word.length) ? 'typo' : rawType;
+
+        let corrected;
+        switch (mistakeType) {
+            case 'transposition': corrected = await doTranspositionMistake(element, word, pos); break;
+            case 'double':        corrected = await doDoubleMistake(element, word, pos);        break;
+            case 'skip':          corrected = await doSkipMistake(element, word, pos);          break;
+            default:              corrected = await doTypoMistake(element, word, pos);          break;
         }
-        
-        return shouldCorrect;
+
+        // Record the mistake
+        stats.totalMistakes++;
+        if (corrected) stats.correctedMistakes++;
+        stats.mistakeHistory.push({ word, mistakeType, corrected, timestamp: Date.now() });
+        if (stats.mistakeHistory.length > 50) stats.mistakeHistory.shift();
+
+        return corrected;
     }
 
     function simulateBackspace(element) {
@@ -201,7 +389,111 @@
 
     // --- İSTATİSTİK FONKSİYONLARI ---
     let lastCharWasSpace = true; // Start as true so first word counts properly
-    
+
+    // --- HATA ANALİZİ YARDIMCILARI ---
+    function getMistakeTypeName(type) {
+        const names = {
+            'typo':          'yanlış tuş',
+            'transposition': 'harf yer değiştirme',
+            'double':        'çift harf',
+            'skip':          'harf atlama',
+        };
+        return names[type] || type;
+    }
+
+    function generateMistakeInsight() {
+        const history = stats.wordHistory;
+        if (history.length === 0) {
+            return '<em>Bot başlatıldığında hata analizi burada görünecek.</em>';
+        }
+        const recent = history.slice(-10);
+        const recentMistakes = recent.filter(w => w.hadMistake);
+        const mistakeRate = recent.length > 0 ? recentMistakes.length / recent.length : 0;
+
+        if (recentMistakes.length === 0) {
+            return `✅ Son ${recent.length} kelimede hiç hata yok. Harika performans!`;
+        }
+
+        // Most common mistake type in recent history
+        const typeCounts = {};
+        stats.mistakeHistory.slice(-20).forEach(m => {
+            typeCounts[m.mistakeType] = (typeCounts[m.mistakeType] || 0) + 1;
+        });
+        const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
+        const correctionRate = stats.totalMistakes > 0
+            ? Math.round(stats.correctedMistakes / stats.totalMistakes * 100)
+            : 0;
+
+        const sev = mistakeRate < 0.15 ? '💛' : mistakeRate < 0.35 ? '🟠' : '🔴';
+        let text = `${sev} Son ${recent.length} kelimede <strong>${recentMistakes.length} hata</strong> (%${Math.round(mistakeRate * 100)}). `;
+        if (topType) {
+            text += `En sık: <strong>${getMistakeTypeName(topType[0])}</strong>. `;
+        }
+        if (stats.totalMistakes > 0) {
+            text += `Düzeltme oranı: <strong>%${correctionRate}</strong>.`;
+        }
+        // Next-mistake prediction (uses same formula as shouldMakeMistake)
+        if (config.mistakeMode === 'rate') {
+            const wc = stats.mistakeWordCount;
+            // Words until (wc+1+k) % rate === 0
+            const rem = (wc + 1) % config.mistakeRate;
+            const wordsToNext = rem === 0 ? 0 : config.mistakeRate - rem;
+            if (wordsToNext === 0) {
+                text += ` ⚡ <strong>Hata bekleniyor!</strong>`;
+            } else {
+                text += ` Sonraki hata tahmini: <strong>${wordsToNext} kelime sonra</strong>.`;
+            }
+        } else if (config.mistakeMode === 'chance') {
+            text += ` Her kelimede <strong>%${config.mistakeChance}</strong> hata olasılığı.`;
+        }
+        return text;
+    }
+
+    function updateMistakeChart() {
+        const barsEl      = document.getElementById('mistake-bars');
+        const assistantEl = document.getElementById('mistake-assistant');
+        const totalEl     = document.getElementById('mistake-total-count');
+        const correctedEl = document.getElementById('mistake-corrected-count');
+        const nextPredEl  = document.getElementById('mistake-next-pred');
+
+        if (!barsEl) return;
+
+        if (totalEl)    totalEl.innerText    = stats.totalMistakes;
+        if (correctedEl) correctedEl.innerText = stats.correctedMistakes;
+        if (nextPredEl) {
+            if (config.mistakeMode === 'rate') {
+                const wc = stats.mistakeWordCount;
+                const rem = (wc + 1) % config.mistakeRate;
+                const n = rem === 0 ? 0 : config.mistakeRate - rem;
+                nextPredEl.innerText = n === 0 ? '⚡ şimdi!' : n + ' kelime';
+            } else if (config.mistakeMode === 'chance') {
+                nextPredEl.innerText = '%' + config.mistakeChance;
+            } else {
+                nextPredEl.innerText = '—';
+            }
+        }
+
+        const history = stats.wordHistory;
+        if (history.length === 0) {
+            barsEl.innerHTML = '<span style="font-size:9px; color:rgba(255,255,255,0.25); align-self:center; width:100%; text-align:center;">Henüz kelime yok</span>';
+        } else {
+            barsEl.innerHTML = history.map((entry, i) => {
+                const color = !entry.hadMistake ? '#30d158'
+                            : entry.corrected   ? '#ff9f0a'
+                            :                     '#ff453a';
+                const isLast = i === history.length - 1;
+                const title = entry.hadMistake
+                    ? `"${entry.word}" - ${getMistakeTypeName(entry.mistakeType)} (${entry.corrected ? 'düzeltildi' : 'düzeltilmedi'})`
+                    : `"${entry.word}" - doğru`;
+                return `<div title="${title}" style="flex:1; min-width:6px; max-width:18px; height:100%; background:${color}; border-radius:3px 3px 0 0; opacity:${isLast ? '1' : '0.65'}; transition:opacity 0.3s;"></div>`;
+            }).join('');
+        }
+
+        if (assistantEl) {
+            assistantEl.innerHTML = '🤖 ' + generateMistakeInsight();
+        }
+    }
+
     function updateStats(char) {
         stats.totalChars++;
         
@@ -233,6 +525,12 @@
         stats.currentWPM = 0;
         stats.estimatedWPM = calculateEstimatedWPM();
         lastCharWasSpace = true; // Reset word boundary tracking
+        // Reset mistake analytics
+        stats.mistakeHistory = [];
+        stats.wordHistory = [];
+        stats.totalMistakes = 0;
+        stats.correctedMistakes = 0;
+        stats.mistakeWordCount = 0;
 
         // Her saniye istatistikleri güncelle
         if (stats.updateInterval) clearInterval(stats.updateInterval);
@@ -403,6 +701,9 @@
             lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
             lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
         }
+
+        // Refresh mistake chart while stats panel is open
+        updateMistakeChart();
     }
 
     // --- ELEMENT BULUCU (HTML Analizi) ---
@@ -419,8 +720,8 @@
             return { source: sourceEl, input: inputEl, type: 'textarea' };
         }
 
-        // 2. KELİME ÇALIŞMASI
-        const lessonSource = document.querySelector('#qklavyemetni');
+        // 2. F/Q KELİME ÇALIŞMASI (F veya Q klavye ders modu)
+        const lessonSource = document.querySelector('#fklavyemetni, #qklavyemetni');
         const lessonInput = document.querySelector('#yazialani');
 
         if (lessonSource && lessonInput) {
@@ -492,68 +793,126 @@
         input.removeAttribute('disabled');
         input.focus();
 
-        logger('Düello Döngüsü başlıyor...');
-        
+        // ── Resume: derive position state from already-typed content ──────────────
+        // wordCount = number of fully-completed words already in input.value.
+        // A word is "complete" when it is followed by whitespace.
         let wordCount = 0;
-        let currentWord = '';
+        {
+            const v = input.value;
+            if (v) {
+                const words = v.trim().split(/\s+/).filter(Boolean);
+                wordCount = /\s$/.test(v) ? words.length : Math.max(0, words.length - 1);
+                stats.totalWords = wordCount;
+                stats.mistakeWordCount = wordCount;
+            }
+            // Fix lastCharWasSpace (startStatsTracking always resets it to true)
+            if (v.length > 0) lastCharWasSpace = /\s/.test(v[v.length - 1]);
+        }
+
+        logger(`Döngü başlıyor – pos=${input.value.length}, tamamlanan kelime=${wordCount}`);
 
         while (config.active) {
             const sourceText = source.value;
-            const currentVal = input.value;
 
-            if (!sourceText || sourceText.length === 0) {
-                await sleep(500);
+            if (!sourceText) {
+                await sleep(300);
                 continue;
             }
 
-            if (currentVal.length >= sourceText.length) {
-                logger('Metin bitti.');
+            // ── Single source-of-truth cursor: always re-read length ──────────────
+            const pos = input.value.length;
+
+            // Guard: position must not exceed source length
+            if (pos > sourceText.length) {
+                logger(`UYARI: pozisyon (${pos}) kaynak uzunluğunu (${sourceText.length}) aşıyor – durduruluyor.`, 'warn');
                 stopBot();
                 break;
             }
 
-            let charToType = sourceText[currentVal.length];
-            if (charToType.charCodeAt(0) === 160) charToType = " ";
-            
-            const isSpace = (charToType === ' ' || charToType === '\n' || charToType === '\t');
-            
-            // Handle word-based mistakes
-            if (isSpace && currentWord.length > 0) {
-                wordCount++;
-                currentWord = '';
-            } else if (!isSpace) {
-                currentWord += charToType;
-                
-                // Check if we should make a mistake on this word
-                const shouldMakeMistake = (
-                    (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') &&
-                    wordCount > 0 &&
-                    wordCount % config.mistakeRate === 0 &&
-                    currentWord.length === 1 // Only at the start of the word
-                );
-                
-                if (shouldMakeMistake && config.mistakeMode === 'advanced') {
-                    // Advanced mistake: type the whole word with a mistake
-                    const remainingWord = sourceText.slice(currentVal.length).split(/[\s\n\t]/)[0];
-                    if (remainingWord.length > 2) {
-                        logger(`Making mistake on word: ${remainingWord}`);
-                        await typeWithMistake(input, remainingWord);
-                        wordCount++;
-                        currentWord = '';
-                        continue;
+            if (pos >= sourceText.length) {
+                logger('Metin tamamlandı.');
+                stopBot();
+                break;
+            }
+
+            // Next character to type (convert non-breaking space to normal space)
+            let ch = sourceText[pos];
+            if (ch.charCodeAt(0) === 160) ch = ' ';
+            const isSpace = /\s/.test(ch);
+
+            // ── Word-boundary mistake trigger ─────────────────────────────────────
+            // atWordStart: pos is the first character of a new word
+            const atWordStart = pos === 0 || /\s/.test(sourceText[pos - 1]);
+
+            if (!isSpace && atWordStart && shouldMakeMistake(wordCount)) {
+                // Extract the full word starting at pos
+                const word = sourceText.slice(pos).split(/[\s\n\t]/)[0];
+                if (word.length >= MIN_WORD_LEN_FOR_MISTAKE) {
+                    logger(`Hata yapılıyor: "${word}" (kelime #${wordCount + 1})`);
+                    await typeWithMistake(input, word);
+
+                    // ── Position snap ─────────────────────────────────────────────
+                    // typeWithMistake may leave input.value.length off by ±1 for
+                    // uncorrected double (+1) or skip (-1) mistakes.  Fix it here.
+                    const targetLen = pos + word.length;
+                    if (input.value.length !== targetLen) {
+                        logger(`Pozisyon snap: ${input.value.length} → ${targetLen}`);
+                        while (input.value.length > targetLen) {
+                            simulateBackspace(input);
+                        }
+                        // For a short-fall, fill from sourceText (same position arithmetic)
+                        while (input.value.length < targetLen && input.value.length < sourceText.length) {
+                            // Type the character that SHOULD be at this position in the word
+                            const fillIdx = input.value.length - pos; // index within `word`
+                            simulateKey(input, fillIdx < word.length ? word[fillIdx] : sourceText[input.value.length]);
+                        }
                     }
+
+                    // Track word in history
+                    const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
+                    stats.wordHistory.push({
+                        word,
+                        hadMistake: true,
+                        mistakeType: lastM && lastM.word === word ? lastM.mistakeType : 'typo',
+                        corrected:   lastM && lastM.word === word ? lastM.corrected   : false,
+                    });
+                    if (stats.wordHistory.length > 30) stats.wordHistory.shift();
+
+                    wordCount++;
+                    stats.mistakeWordCount = wordCount;
+                    stats.lastWord = word;
+                    stats.lastWordCorrect = false;
+                    continue; // next iteration reads fresh pos from input.value.length
                 }
             }
 
-            simulateKey(input, charToType);
-            
-            // Use human-like delay with random pauses
-            const delay = getHumanLikeDelay();
-            await sleep(delay);
-            
-            if (shouldAddRandomPause()) {
-                await sleep(getRandomPauseDelay());
+            // ── Normal character type ─────────────────────────────────────────────
+            simulateKey(input, ch);
+
+            // Track word completion: a space typed after a non-space character
+            // means the preceding word just finished.
+            if (isSpace && pos > 0 && !/\s/.test(sourceText[pos - 1])) {
+                // Walk back to find the start of the just-completed word
+                let wordStart = pos - 1;
+                while (wordStart > 0 && !/\s/.test(sourceText[wordStart - 1])) wordStart--;
+                const completedWord = sourceText.slice(wordStart, pos);
+
+                stats.wordHistory.push({
+                    word: completedWord,
+                    hadMistake: false,
+                    mistakeType: null,
+                    corrected: false,
+                });
+                if (stats.wordHistory.length > 30) stats.wordHistory.shift();
+
+                wordCount++;
+                stats.mistakeWordCount = wordCount;
+                stats.lastWord = completedWord;
+                stats.lastWordCorrect = true;
             }
+
+            await sleep(getHumanLikeDelay());
+            if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
         }
     }
 
@@ -564,26 +923,95 @@
         input.removeAttribute('disabled');
         input.focus();
 
-        const spans = Array.from(source.querySelectorAll('span'));
-        logger(`Ders modu: ${spans.length} karakter bulundu.`);
+        // On the very first section, skip spans that were already typed (resume support)
+        let firstIteration = true;
 
-        for (let i = 0; i < spans.length; i++) {
+        // Outer loop: re-runs each time the lesson content refreshes (new section loaded)
+        while (config.active) {
+            const spans = Array.from(source.querySelectorAll('span'));
+
+            if (spans.length === 0) {
+                logger('Ders içeriği bekleniyor...', 'warn');
+                await sleep(200);
+                continue;
+            }
+
+            // Resume: on first run, skip spans already covered by existing input.
+            // Accumulate span text lengths (each span is usually 1 char, but we handle
+            // multi-char or empty spans safely) until we match input.value.length.
+            let startIndex = 0;
+            if (firstIteration && input.value.length > 0) {
+                let accumulated = 0;
+                for (let j = 0; j < spans.length; j++) {
+                    const t = spans[j].textContent;
+                    accumulated += (t === '' || t.charCodeAt(0) === 160) ? 1 : t.length;
+                    if (accumulated >= input.value.length) {
+                        startIndex = j + 1;
+                        break;
+                    }
+                }
+            }
+            firstIteration = false;
+
+            if (startIndex > 0) {
+                logger(`Ders modu: ${startIndex} span atlandı (kaldığı yerden devam).`);
+            }
+            logger(`Ders modu: ${spans.length} karakter bulundu.`);
+
+            let contentChanged = false;
+
+            for (let i = startIndex; i < spans.length; i++) {
+                if (!config.active) break;
+
+                // Detect if the source content changed mid-typing (span removed from DOM)
+                if (!source.contains(spans[i])) {
+                    contentChanged = true;
+                    logger('Ders içeriği değişti, yeniden okunuyor...');
+                    break;
+                }
+
+                let charToType = spans[i].textContent;
+                if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
+
+                simulateKey(input, charToType);
+                if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
+
+                const delay = getHumanLikeDelay();
+                await sleep(delay);
+
+                if (shouldAddRandomPause()) {
+                    await sleep(getRandomPauseDelay());
+                }
+            }
+
             if (!config.active) break;
 
-            let charToType = spans[i].textContent;
-            if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
+            if (!contentChanged) {
+                // All spans typed — wait for the next section to load
+                logger('Bölüm tamamlandı, yeni içerik bekleniyor...');
+                const firstSpanText = spans[0].textContent;
+                const spanCount = spans.length;
 
-            simulateKey(input, charToType);
-            if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
+                let waited = 0;
+                const maxWait = 10000;
+                while (config.active && waited < maxWait) {
+                    await sleep(150);
+                    waited += 150;
+                    const newSpans = source.querySelectorAll('span');
+                    if (newSpans.length !== spanCount ||
+                        (newSpans.length > 0 && newSpans[0].textContent !== firstSpanText)) {
+                        logger('Yeni ders içeriği algılandı!');
+                        break;
+                    }
+                }
 
-            const delay = getHumanLikeDelay();
-            await sleep(delay);
-            
-            if (shouldAddRandomPause()) {
-                await sleep(getRandomPauseDelay());
+                if (waited >= maxWait) {
+                    logger('Yeni içerik bulunamadı, bot durduruluyor.');
+                    stopBot();
+                    break;
+                }
             }
         }
-        stopBot();
     }
 
     // --- DÖNGÜ (HIZ TESTİ) ---
@@ -594,8 +1022,20 @@
         input.focus();
 
         logger('Hız Testi Döngüsü başlıyor...');
-        
+
+        // ── Resume: compute wordCount from already-typed content ──────────────────
+        // This ensures the mistake trigger fires at the correct cadence even if the
+        // bot was stopped and restarted mid-session.
         let wordCount = 0;
+        {
+            const v = input.value;
+            if (v) {
+                const words = v.trim().split(/\s+/).filter(Boolean);
+                // A trailing space means the last word is fully complete
+                wordCount = /\s$/.test(v) ? words.length : Math.max(0, words.length - 1);
+                stats.mistakeWordCount = wordCount;
+            }
+        }
 
         while (config.active) {
             const activeWordSpan = source.querySelector('.golge');
@@ -607,62 +1047,79 @@
             }
 
             const wordToType = activeWordSpan.textContent.trim();
-            logger(`Kelime yazılıyor: ${wordToType}`);
-            
-            // Check if we should make a mistake on this word
-            let shouldMakeMistake = false;
-            if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
-                shouldMakeMistake = (
-                    wordCount > 0 &&
-                    wordCount % config.mistakeRate === 0 &&
-                    wordToType.length > 2
-                );
-            } else if (config.mistakeMode === 'custom') {
-                // Custom mode: use percentage chance
-                shouldMakeMistake = (
-                    Math.random() * 100 < config.mistakeChance &&
-                    wordToType.length > 2
-                );
+            if (!wordToType) {
+                await sleep(200);
+                continue;
             }
-            
-            let wordWasCorrect = true;
-            if (shouldMakeMistake && (config.mistakeMode === 'advanced' || config.mistakeMode === 'custom')) {
-                wordWasCorrect = await typeWithMistake(input, wordToType);
-            } else {
-                for (let i = 0; i < wordToType.length; i++) {
-                    if (!config.active) break;
-                    simulateKey(input, wordToType[i]);
-                    const delay = getHumanLikeDelay();
-                    await sleep(delay);
+
+            logger(`Kelime yazılıyor: "${wordToType}" (kelime #${wordCount + 1})`);
+
+            // ── Resume partial-word fix ───────────────────────────────────────────
+            // If the bot was stopped mid-word, input.value may already end with a
+            // prefix of wordToType (e.g. "bro" when word is "brown").  Skip those
+            // characters so we don't duplicate them and create "brobrown".
+            let startCharIdx = 0;
+            {
+                const inputVal = input.value;
+                if (inputVal && !/\s$/.test(inputVal)) {
+                    // Last token (content after the last space) is the partial word
+                    const lastSpaceIdx = inputVal.lastIndexOf(' ');
+                    const lastPart = lastSpaceIdx >= 0 ? inputVal.slice(lastSpaceIdx + 1) : inputVal;
+                    if (lastPart.length > 0 &&
+                        lastPart.length < wordToType.length &&
+                        wordToType.startsWith(lastPart)) {
+                        startCharIdx = lastPart.length;
+                        logger(`Kelime devam ettiriliyor: "${wordToType}" (${startCharIdx} karakter atlandı)`);
+                    }
                 }
             }
 
-            // Track last word and whether it was correct
-            stats.lastWord = wordToType;
-            stats.lastWordCorrect = !shouldMakeMistake || wordWasCorrect;
-            
-            // Immediately update the display for last word
-            const lastWordDisplay = document.getElementById('last-word-display');
-            const lastWordStatus = document.getElementById('last-word-status');
-            if (lastWordDisplay) {
-                lastWordDisplay.innerText = stats.lastWord || '—';
+            // Only attempt a mistake at the very start of the word (not on resume continuation)
+            const makeMistake = startCharIdx === 0 &&
+                shouldMakeMistake(wordCount) &&
+                wordToType.length >= MIN_WORD_LEN_FOR_MISTAKE;
+
+            let wordWasCorrect = true;
+            if (makeMistake) {
+                wordWasCorrect = await typeWithMistake(input, wordToType);
+            } else {
+                for (let i = startCharIdx; i < wordToType.length; i++) {
+                    if (!config.active) break;
+                    simulateKey(input, wordToType[i]);
+                    await sleep(getHumanLikeDelay());
+                }
             }
+
+            if (!config.active) break;
+
+            // Track word in history for mistake chart
+            const lastM = makeMistake ? stats.mistakeHistory[stats.mistakeHistory.length - 1] : null;
+            stats.wordHistory.push({
+                word: wordToType,
+                hadMistake: makeMistake,
+                mistakeType: lastM ? lastM.mistakeType : null,
+                corrected: makeMistake ? wordWasCorrect : false,
+            });
+            if (stats.wordHistory.length > 30) stats.wordHistory.shift();
+
+            stats.lastWord = wordToType;
+            stats.lastWordCorrect = !makeMistake || wordWasCorrect;
+
+            const lastWordDisplay = document.getElementById('last-word-display');
+            const lastWordStatus  = document.getElementById('last-word-status');
+            if (lastWordDisplay) lastWordDisplay.innerText = stats.lastWord || '—';
             if (lastWordStatus) {
                 lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
                 lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
             }
 
-            if (config.active) {
-                simulateKey(input, ' ');
-                const delay = getHumanLikeDelay();
-                await sleep(delay + 30);
-                
-                if (shouldAddRandomPause()) {
-                    await sleep(getRandomPauseDelay());
-                }
-            }
-            
+            // Type the space to advance the game to the next word
+            simulateKey(input, ' ');
+            await sleep(getHumanLikeDelay() + 30);
+            if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
+
             wordCount++;
+            stats.mistakeWordCount = wordCount;
         }
     }
 
@@ -876,56 +1333,67 @@
                             <div style="margin-bottom:8px;">
                                 <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500; display:block; margin-bottom:8px;">❌ Hata Modu</label>
                                 <select id="mistake-mode" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#ffffff; font-size:12px; cursor:pointer;">
-                                    <option value="none" ${config.mistakeMode === 'none' ? 'selected' : ''}>Kapalı</option>
-                                    <option value="basic" ${config.mistakeMode === 'basic' ? 'selected' : ''}>Basit Mod</option>
-                                    <option value="advanced" ${config.mistakeMode === 'advanced' ? 'selected' : ''}>Gelişmiş Mod</option>
-                                    <option value="custom" ${config.mistakeMode === 'custom' ? 'selected' : ''}>Özel Mod</option>
+                                    <option value="none"   ${config.mistakeMode === 'none'   ? 'selected' : ''}>Kapalı</option>
+                                    <option value="rate"   ${config.mistakeMode === 'rate'   ? 'selected' : ''}>Her X Kelimede Bir</option>
+                                    <option value="chance" ${config.mistakeMode === 'chance' ? 'selected' : ''}>İhtimal Bazlı (%)</option>
                                 </select>
                             </div>
-                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-bottom:8px; font-style:italic;">Yazarken kasıtlı hatalar yapar, daha gerçekçi görünüm sağlar.</div>
+                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-bottom:8px; font-style:italic;">Yazarken kasıtlı hata yapar; düzeltme ihtimalini aşağıdan ayarlayın.</div>
+
+                            <!-- Controls: visible when mode != none -->
                             <div id="mistake-controls" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'};">
-                                <div id="mistake-rate-control" style="display:${config.mistakeMode === 'basic' || config.mistakeMode === 'advanced' ? 'block' : 'none'}; margin-bottom:8px;">
+
+                                <!-- Rate-specific -->
+                                <div id="mistake-rate-row" style="display:${config.mistakeMode === 'rate' ? 'block' : 'none'}; margin-bottom:8px;">
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
                                         <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
-                                        <input type="number" id="mistake-rate-input" min="2" max="10" value="${config.mistakeRate}"
+                                        <input type="number" id="mistake-rate-input" min="2" max="20" value="${config.mistakeRate}"
                                             style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
                                             border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                    </div>
+                                    <input type="range" id="mistake-rate-slider" min="2" max="20" step="1" value="${config.mistakeRate}"
+                                        style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none;
+                                        background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:4px;">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">Her 2'de bir</span>
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">Her 20'de bir</span>
                                     </div>
                                 </div>
-                                <div id="mistake-chance-control" style="display:${config.mistakeMode === 'custom' ? 'block' : 'none'};">
+
+                                <!-- Chance-specific -->
+                                <div id="mistake-chance-row" style="display:${config.mistakeMode === 'chance' ? 'block' : 'none'}; margin-bottom:8px;">
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata yapma ihtimali</span>
-                                        <input type="number" id="mistake-chance-input" min="0" max="100" value="${config.mistakeChance}"
+                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata ihtimali (%)</span>
+                                        <input type="number" id="mistake-chance-input" min="1" max="100" value="${config.mistakeChance}"
                                             style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
                                             border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
                                     </div>
-                                    <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-bottom:8px;">
-                                        <strong>%<span id="mistake-chance-display">${config.mistakeChance}</span></strong> ihtimalle hata yapılır
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Silme sayısı</span>
-                                        <input type="number" id="mistake-delete-count-input" min="1" max="10" value="${config.mistakeDeleteCount}"
-                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Temizleme ihtimali</span>
-                                        <input type="number" id="mistake-clear-chance-input" min="0" max="100" value="${config.mistakeClearChance}"
-                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                                        <label style="font-size:11px; color:rgba(255,255,255,0.5);">Doğrusunu yaz</label>
-                                        <label class="ios-switch">
-                                            <input type="checkbox" id="mistake-rewrite-toggle" ${config.mistakeRewriteCorrect ? 'checked' : ''}>
-                                            <span class="ios-slider"></span>
-                                        </label>
+                                    <input type="range" id="mistake-chance-slider" min="1" max="100" step="1" value="${config.mistakeChance}"
+                                        style="width:100%; height:6px; border-radius:3px; outline:none; -webkit-appearance:none;
+                                        background:rgba(255,255,255,0.1); cursor:pointer; margin-bottom:4px;">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">%1</span>
+                                        <span style="font-size:9px; color:rgba(255,255,255,0.4);">%100</span>
                                     </div>
                                 </div>
-                                <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-top:6px; font-style:italic;">
-                                    <div style="margin-bottom:3px;"><strong>Basit:</strong> Sadece takip edilir</div>
-                                    <div style="margin-bottom:3px;"><strong>Gelişmiş:</strong> Hata yazar, %70 düzeltir</div>
-                                    <div><strong>Özel:</strong> İhtimal bazlı hata yapma</div>
+
+                                <!-- Common: correction chance + delete count -->
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Düzeltme ihtimali (%)</span>
+                                    <input type="number" id="mistake-clear-chance-input" min="0" max="100" value="${config.mistakeClearChance}"
+                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Silme sayısı (1–5)</span>
+                                    <input type="number" id="mistake-delete-count-input" min="1" max="5" value="${config.mistakeDeleteCount}"
+                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                </div>
+
+                                <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.4; margin-top:4px; font-style:italic;">
+                                    <strong>Her X kelimede:</strong> tam düzenli aralıklarla.<br>
+                                    <strong>İhtimal:</strong> her kelimede bağımsız şans.
                                 </div>
                             </div>
                         </div>
@@ -951,6 +1419,43 @@
                         <div style="font-size:11px; font-weight:600; color:#ff9500;">
                             <span id="words-written-10min">0</span> / <span id="forecast-10min-est">0</span>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- Mistake Analysis Section -->
+                <div id="mistake-analysis-section" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'}; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;">
+                    <!-- Header row -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:11px; font-weight:600; color:rgba(255,255,255,0.7);">📊 Hata Analizi</span>
+                        <div style="display:flex; gap:10px; font-size:10px; color:rgba(255,255,255,0.5);">
+                            <span>Toplam: <b id="mistake-total-count" style="color:#ff453a;">0</b></span>
+                            <span>Düzeltilen: <b id="mistake-corrected-count" style="color:#30d158;">0</b></span>
+                            <span>Sonraki: <b id="mistake-next-pred" style="color:#ffd60a;">—</b></span>
+                        </div>
+                    </div>
+                    <!-- Bar Chart -->
+                    <div style="background:rgba(255,255,255,0.03); border-radius:8px; padding:8px; border:1px solid rgba(255,255,255,0.06); margin-bottom:8px;">
+                        <div id="mistake-bars" style="display:flex; gap:3px; height:40px; align-items:flex-end; overflow:hidden;">
+                            <span style="font-size:9px; color:rgba(255,255,255,0.25); align-self:center; width:100%; text-align:center;">Henüz kelime yok</span>
+                        </div>
+                        <div style="display:flex; gap:12px; margin-top:5px;">
+                            <div style="display:flex; align-items:center; gap:3px;">
+                                <div style="width:8px; height:8px; background:#30d158; border-radius:2px;"></div>
+                                <span style="font-size:8px; color:rgba(255,255,255,0.4);">Doğru</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:3px;">
+                                <div style="width:8px; height:8px; background:#ff9f0a; border-radius:2px;"></div>
+                                <span style="font-size:8px; color:rgba(255,255,255,0.4);">Düzeltildi</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:3px;">
+                                <div style="width:8px; height:8px; background:#ff453a; border-radius:2px;"></div>
+                                <span style="font-size:8px; color:rgba(255,255,255,0.4);">Hatalı bırakıldı</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Assistant Text -->
+                    <div id="mistake-assistant" style="background:rgba(0,122,255,0.08); border:1px solid rgba(0,122,255,0.15); border-radius:8px; padding:8px 10px; font-size:11px; color:rgba(255,255,255,0.75); line-height:1.5;">
+                        🤖 <em>Bot başlatıldığında hata analizi burada görünecek.</em>
                     </div>
                 </div>
             </div>
@@ -1252,62 +1757,50 @@
             config.mistakeMode = this.value;
             localStorage.setItem('katip-mistake-mode', this.value);
             const controls = document.getElementById('mistake-controls');
-            const rateControl = document.getElementById('mistake-rate-control');
-            const chanceControl = document.getElementById('mistake-chance-control');
-            
+            const rateRow = document.getElementById('mistake-rate-row');
+            const chanceRow = document.getElementById('mistake-chance-row');
+            const analysisSection = document.getElementById('mistake-analysis-section');
+
             controls.style.display = this.value !== 'none' ? 'block' : 'none';
-            
-            if (this.value === 'basic' || this.value === 'advanced') {
-                rateControl.style.display = 'block';
-                chanceControl.style.display = 'none';
-            } else if (this.value === 'custom') {
-                rateControl.style.display = 'none';
-                chanceControl.style.display = 'block';
-            }
-            
+            if (analysisSection) analysisSection.style.display = this.value !== 'none' ? 'block' : 'none';
+
+            // Rate/chance rows are block containers (label+input / slider / labels stacked vertically).
+            if (rateRow)   rateRow.style.display   = this.value === 'rate'   ? 'block' : 'none';
+            if (chanceRow) chanceRow.style.display = this.value === 'chance' ? 'block' : 'none';
+
+            updateMistakeChart();
             logger(`Hata modu: ${this.value}`);
         };
-        
-        // Mistake rate input
-        const mistakeRateInput = document.getElementById('mistake-rate-input');
-        mistakeRateInput.oninput = function() {
-            let value = parseInt(this.value);
-            if (isNaN(value) || value < 2) value = 2;
-            if (value > 10) value = 10;
-            this.value = value;
+
+        // Mistake rate input + slider (rate mode) — bidirectional sync
+        const mistakeRateInput  = document.getElementById('mistake-rate-input');
+        const mistakeRateSlider = document.getElementById('mistake-rate-slider');
+        function applyMistakeRate(value) {
+            value = Math.max(2, Math.min(20, parseInt(value) || 2));
             config.mistakeRate = value;
             localStorage.setItem('katip-mistake-rate', value);
-        };
+            if (mistakeRateInput)  mistakeRateInput.value  = value;
+            if (mistakeRateSlider) mistakeRateSlider.value = value;
+            updateMistakeChart();
+        }
+        if (mistakeRateInput)  mistakeRateInput.oninput  = function() { applyMistakeRate(this.value); };
+        if (mistakeRateSlider) mistakeRateSlider.oninput = function() { applyMistakeRate(this.value); };
 
-        // Mistake chance input
-        const mistakeChanceInput = document.getElementById('mistake-chance-input');
-        const mistakeChanceDisplay = document.getElementById('mistake-chance-display');
-        mistakeChanceInput.oninput = function() {
-            let value = parseInt(this.value);
-            if (isNaN(value) || value < 0) value = 0;
-            if (value > 100) value = 100;
-            this.value = value;
+        // Mistake chance input + slider (chance mode) — bidirectional sync
+        const mistakeChanceInput  = document.getElementById('mistake-chance-input');
+        const mistakeChanceSlider = document.getElementById('mistake-chance-slider');
+        function applyMistakeChance(value) {
+            value = Math.max(1, Math.min(100, parseInt(value) || 1));
             config.mistakeChance = value;
             localStorage.setItem('katip-mistake-chance', value);
-            if (mistakeChanceDisplay) {
-                mistakeChanceDisplay.innerText = value;
-            }
-        };
-        
-        // Mistake delete count input
-        const mistakeDeleteCountInput = document.getElementById('mistake-delete-count-input');
-        if (mistakeDeleteCountInput) {
-            mistakeDeleteCountInput.oninput = function() {
-                let value = parseInt(this.value);
-                if (isNaN(value) || value < 1) value = 1;
-                if (value > 10) value = 10;
-                this.value = value;
-                config.mistakeDeleteCount = value;
-                localStorage.setItem('katip-mistake-delete-count', value);
-            };
+            if (mistakeChanceInput)  mistakeChanceInput.value  = value;
+            if (mistakeChanceSlider) mistakeChanceSlider.value = value;
+            updateMistakeChart();
         }
-        
-        // Mistake clear chance input
+        if (mistakeChanceInput)  mistakeChanceInput.oninput  = function() { applyMistakeChance(this.value); };
+        if (mistakeChanceSlider) mistakeChanceSlider.oninput = function() { applyMistakeChance(this.value); };
+
+        // Correction chance input (both modes)
         const mistakeClearChanceInput = document.getElementById('mistake-clear-chance-input');
         if (mistakeClearChanceInput) {
             mistakeClearChanceInput.oninput = function() {
@@ -1317,16 +1810,20 @@
                 this.value = value;
                 config.mistakeClearChance = value;
                 localStorage.setItem('katip-mistake-clear-chance', value);
+                updateMistakeChart();
             };
         }
-        
-        // Mistake rewrite toggle
-        const mistakeRewriteToggle = document.getElementById('mistake-rewrite-toggle');
-        if (mistakeRewriteToggle) {
-            mistakeRewriteToggle.onchange = function() {
-                config.mistakeRewriteCorrect = this.checked;
-                localStorage.setItem('katip-mistake-rewrite', String(this.checked));
-                logger(`Doğrusunu yazma modu ${this.checked ? 'aktif' : 'deaktif'}`);
+
+        // Delete count input (both modes)
+        const mistakeDeleteCountInput = document.getElementById('mistake-delete-count-input');
+        if (mistakeDeleteCountInput) {
+            mistakeDeleteCountInput.oninput = function() {
+                let value = parseInt(this.value);
+                if (isNaN(value) || value < 1) value = 1;
+                if (value > 5) value = 5;
+                this.value = value;
+                config.mistakeDeleteCount = value;
+                localStorage.setItem('katip-mistake-delete-count', value);
             };
         }
 
@@ -1561,12 +2058,42 @@
                 -moz-appearance: textfield;
             }
             #mistake-rate-input::-webkit-outer-spin-button,
-            #mistake-rate-input::-webkit-inner-spin-button {
+            #mistake-rate-input::-webkit-inner-spin-button,
+            #mistake-chance-input::-webkit-outer-spin-button,
+            #mistake-chance-input::-webkit-inner-spin-button {
                 -webkit-appearance: none;
                 margin: 0;
             }
-            #mistake-rate-input[type=number] {
+            #mistake-rate-input[type=number],
+            #mistake-chance-input[type=number] {
                 -moz-appearance: textfield;
+            }
+            #mistake-rate-slider::-webkit-slider-thumb,
+            #mistake-chance-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: #ff453a;
+                cursor: pointer;
+                box-shadow: 0 2px 6px rgba(255,69,58,0.4);
+                transition: all 0.2s;
+            }
+            #mistake-rate-slider::-webkit-slider-thumb:hover,
+            #mistake-chance-slider::-webkit-slider-thumb:hover {
+                transform: scale(1.2);
+                box-shadow: 0 4px 10px rgba(255,69,58,0.6);
+            }
+            #mistake-rate-slider::-moz-range-thumb,
+            #mistake-chance-slider::-moz-range-thumb {
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: #ff453a;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 2px 6px rgba(255,69,58,0.4);
             }
             #mistake-mode {
                 -webkit-appearance: none;
