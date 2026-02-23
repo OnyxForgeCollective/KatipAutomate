@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.4
+// @version      v2.5
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -16,21 +16,31 @@
     'use strict';
 
     // --- AYARLAR ---
+    // Migrate old mistake mode values from previous versions
+    (function migrateOldMistakeMode() {
+        const old = localStorage.getItem('katip-mistake-mode');
+        if (old === 'basic' || old === 'advanced') localStorage.setItem('katip-mistake-mode', 'rate');
+        else if (old === 'custom') localStorage.setItem('katip-mistake-mode', 'chance');
+    })();
+
     const config = {
         active: false,
-        delay: parseInt(localStorage.getItem('katip-speed')) || 120, // İki harf arası bekleme süresi (ms)
-        debug: true, // Konsolda detaylı hata ayıklama görmek için true
-        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true', // Panel başlangıç durumu
-        wordLimitEnabled: localStorage.getItem('katip-word-limit-enabled') === 'true', // Kelime limiti aktif mi
-        wordLimit: parseInt(localStorage.getItem('katip-word-limit')) || 50, // Kaç kelime yazılacak
-        infoExpanded: false, // Info panel durumu
-        mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none', // none, basic, advanced, custom
-        mistakeRate: parseInt(localStorage.getItem('katip-mistake-rate')) || 3, // Her kaç kelimede bir hata
-        mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 50, // Hata yapma şansı (%)
-        mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 1, // Hatadan sonra kaç kere silme
-        mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70, // Temizleme ihtimali (%)
-        mistakeRewriteCorrect: localStorage.getItem('katip-mistake-rewrite') !== 'false', // Hatadan sonra doğru kelimeyi yazma (default: true)
-        humanLikeTyping: localStorage.getItem('katip-human-like') === 'true' // İnsan gibi yazma modu
+        delay: parseInt(localStorage.getItem('katip-speed')) || 120,
+        debug: true,
+        panelMinimized: localStorage.getItem('katip-panel-minimized') === 'true',
+        wordLimitEnabled: localStorage.getItem('katip-word-limit-enabled') === 'true',
+        wordLimit: parseInt(localStorage.getItem('katip-word-limit')) || 50,
+        infoExpanded: false,
+        humanLikeTyping: localStorage.getItem('katip-human-like') === 'true',
+        // --- Hata Sistemi ---
+        // mistakeMode: 'none' | 'rate' | 'chance'
+        //   rate   → her mistakeRate kelimede bir hata
+        //   chance → her kelimede mistakeChance% ihtimalle hata
+        mistakeMode: localStorage.getItem('katip-mistake-mode') || 'none',
+        mistakeRate: parseInt(localStorage.getItem('katip-mistake-rate')) || 5,
+        mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 30,
+        mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70,
+        mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 1,
     };
 
     // --- İSTATİSTİKLER ---
@@ -149,6 +159,26 @@
         return types[Math.floor(Math.random() * types.length)];
     }
 
+    // Minimum word length needed to attempt a meaningful mistake
+    const MIN_WORD_LEN_FOR_MISTAKE = 3;
+
+    /**
+     * Central mistake-trigger decision.
+     * @param {number} wordCount  – number of fully-completed words so far
+     * @returns {boolean}
+     */
+    function shouldMakeMistake(wordCount) {
+        if (config.mistakeMode === 'rate') {
+            // Every mistakeRate words (never on word 0)
+            return wordCount > 0 && wordCount % config.mistakeRate === 0;
+        }
+        if (config.mistakeMode === 'chance') {
+            // Each word has mistakeChance% independent probability
+            return Math.random() * 100 < config.mistakeChance;
+        }
+        return false;
+    }
+
     async function doTypoMistake(element, word, pos) {
         for (let i = 0; i < pos; i++) {
             simulateKey(element, word[i]);
@@ -159,20 +189,17 @@
         await sleep(getHumanLikeDelay());
         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
         if (shouldCorrect) {
+            // Notice the mistake, then backspace and retype
             await sleep(200 + Math.random() * 300);
-            const deleteCount = config.mistakeDeleteCount || 1;
+            const deleteCount = Math.min(config.mistakeDeleteCount, pos + 1);
             for (let i = 0; i < deleteCount; i++) {
                 simulateBackspace(element);
                 await sleep(getHumanLikeDelay());
             }
-            if (config.mistakeRewriteCorrect) {
-                const startPos = Math.max(0, pos - deleteCount + 1);
-                for (let i = startPos; i <= pos; i++) {
-                    simulateKey(element, word[i]);
-                    await sleep(getHumanLikeDelay());
-                }
-            } else {
-                simulateKey(element, word[pos]);
+            // Retype the characters we deleted
+            const startPos = Math.max(0, pos - deleteCount + 1);
+            for (let i = startPos; i <= pos; i++) {
+                simulateKey(element, word[i]);
                 await sleep(getHumanLikeDelay());
             }
         }
@@ -272,8 +299,8 @@
     }
 
     async function typeWithMistake(element, word) {
-        // Words shorter than 3 chars are too short to make meaningful mistakes in
-        if (word.length < 3) {
+        // Don't attempt mistakes on very short words
+        if (word.length < MIN_WORD_LEN_FOR_MISTAKE) {
             for (let i = 0; i < word.length; i++) {
                 simulateKey(element, word[i]);
                 await sleep(getHumanLikeDelay());
@@ -381,7 +408,7 @@
             text += `Düzeltme oranı: <strong>%${correctionRate}</strong>.`;
         }
         // Next-mistake prediction
-        if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
+        if (config.mistakeMode === 'rate') {
             const rem = stats.totalWords % config.mistakeRate;
             const wordsToNext = rem === 0 ? 0 : config.mistakeRate - rem;
             if (wordsToNext <= 2) {
@@ -389,7 +416,7 @@
             } else {
                 text += ` Sonraki hata tahmini: <strong>${wordsToNext} kelime sonra</strong>.`;
             }
-        } else if (config.mistakeMode === 'custom') {
+        } else if (config.mistakeMode === 'chance') {
             text += ` Her kelimede <strong>%${config.mistakeChance}</strong> hata olasılığı.`;
         }
         return text;
@@ -407,11 +434,11 @@
         if (totalEl)    totalEl.innerText    = stats.totalMistakes;
         if (correctedEl) correctedEl.innerText = stats.correctedMistakes;
         if (nextPredEl) {
-            if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
+            if (config.mistakeMode === 'rate') {
                 const rem = stats.totalWords % config.mistakeRate;
                 const n = rem === 0 ? 0 : config.mistakeRate - rem;
                 nextPredEl.innerText = n === 0 ? '⚡ şimdi!' : n + ' kelime';
-            } else if (config.mistakeMode === 'custom') {
+            } else if (config.mistakeMode === 'chance') {
                 nextPredEl.innerText = '%' + config.mistakeChance;
             } else {
                 nextPredEl.innerText = '—';
@@ -779,22 +806,14 @@
                 currentWord = '';
             } else if (!isSpace) {
                 currentWord += charToType;
-                
-                // Check if we should make a mistake on this word
-                const shouldMakeMistake = (
-                    (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') &&
-                    wordCount > 0 &&
-                    wordCount % config.mistakeRate === 0 &&
-                    currentWord.length === 1 // Only at the start of the word
-                );
-                
-                if (shouldMakeMistake && config.mistakeMode === 'advanced') {
-                    // Advanced mistake: type the whole word with a mistake
+
+                // At the very first character of a word, decide whether to make a mistake
+                if (currentWord.length === 1 && shouldMakeMistake(wordCount)) {
                     const remainingWord = sourceText.slice(currentVal.length).split(/[\s\n\t]/)[0];
-                    if (remainingWord.length > 2) {
-                        logger(`Making mistake on word: ${remainingWord}`);
+                    if (remainingWord.length >= MIN_WORD_LEN_FOR_MISTAKE) {
+                        logger(`Hata yapılıyor: ${remainingWord}`);
                         await typeWithMistake(input, remainingWord);
-                        // Track the mistake word (typeWithMistake already pushed to mistakeHistory)
+                        // Track this mistake word
                         const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
                         stats.wordHistory.push({
                             word: remainingWord,
@@ -943,25 +962,11 @@
             const wordToType = activeWordSpan.textContent.trim();
             logger(`Kelime yazılıyor: ${wordToType}`);
             
-            // Check if we should make a mistake on this word
-            let shouldMakeMistake = false;
-            if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
-                shouldMakeMistake = (
-                    wordCount > 0 &&
-                    wordCount % config.mistakeRate === 0 &&
-                    wordToType.length > 2
-                );
-            } else if (config.mistakeMode === 'custom') {
-                // Custom mode: use percentage chance
-                shouldMakeMistake = (
-                    Math.random() * 100 < config.mistakeChance &&
-                    wordToType.length > 2
-                );
-            }
-            
+            // Decide whether to make a mistake on this word
+            const makeMistake = shouldMakeMistake(wordCount) && wordToType.length >= MIN_WORD_LEN_FOR_MISTAKE;
+
             let wordWasCorrect = true;
-            const hadActualMistake = shouldMakeMistake && (config.mistakeMode === 'advanced' || config.mistakeMode === 'custom');
-            if (hadActualMistake) {
+            if (makeMistake) {
                 wordWasCorrect = await typeWithMistake(input, wordToType);
             } else {
                 for (let i = 0; i < wordToType.length; i++) {
@@ -973,18 +978,18 @@
             }
 
             // Track word in history for mistake chart
-            const lastM = hadActualMistake ? stats.mistakeHistory[stats.mistakeHistory.length - 1] : null;
+            const lastM = makeMistake ? stats.mistakeHistory[stats.mistakeHistory.length - 1] : null;
             stats.wordHistory.push({
                 word: wordToType,
-                hadMistake: hadActualMistake,
+                hadMistake: makeMistake,
                 mistakeType: lastM ? lastM.mistakeType : null,
-                corrected: hadActualMistake ? wordWasCorrect : false,
+                corrected: makeMistake ? wordWasCorrect : false,
             });
             if (stats.wordHistory.length > 30) stats.wordHistory.shift();
 
             // Track last word and whether it was correct
             stats.lastWord = wordToType;
-            stats.lastWordCorrect = !shouldMakeMistake || wordWasCorrect;
+            stats.lastWordCorrect = !makeMistake || wordWasCorrect;
             
             // Immediately update the display for last word
             const lastWordDisplay = document.getElementById('last-word-display');
@@ -1221,56 +1226,49 @@
                             <div style="margin-bottom:8px;">
                                 <label style="font-size:12px; color:rgba(255,255,255,0.6); font-weight:500; display:block; margin-bottom:8px;">❌ Hata Modu</label>
                                 <select id="mistake-mode" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#ffffff; font-size:12px; cursor:pointer;">
-                                    <option value="none" ${config.mistakeMode === 'none' ? 'selected' : ''}>Kapalı</option>
-                                    <option value="basic" ${config.mistakeMode === 'basic' ? 'selected' : ''}>Basit Mod</option>
-                                    <option value="advanced" ${config.mistakeMode === 'advanced' ? 'selected' : ''}>Gelişmiş Mod</option>
-                                    <option value="custom" ${config.mistakeMode === 'custom' ? 'selected' : ''}>Özel Mod</option>
+                                    <option value="none"   ${config.mistakeMode === 'none'   ? 'selected' : ''}>Kapalı</option>
+                                    <option value="rate"   ${config.mistakeMode === 'rate'   ? 'selected' : ''}>Her X Kelimede Bir</option>
+                                    <option value="chance" ${config.mistakeMode === 'chance' ? 'selected' : ''}>İhtimal Bazlı (%)</option>
                                 </select>
                             </div>
-                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-bottom:8px; font-style:italic;">Yazarken kasıtlı hatalar yapar, daha gerçekçi görünüm sağlar.</div>
+                            <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-bottom:8px; font-style:italic;">Yazarken kasıtlı hata yapar; düzeltme ihtimalini aşağıdan ayarlayın.</div>
+
+                            <!-- Controls: visible when mode != none -->
                             <div id="mistake-controls" style="display:${config.mistakeMode !== 'none' ? 'block' : 'none'};">
-                                <div id="mistake-rate-control" style="display:${config.mistakeMode === 'basic' || config.mistakeMode === 'advanced' ? 'block' : 'none'}; margin-bottom:8px;">
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
-                                        <input type="number" id="mistake-rate-input" min="2" max="10" value="${config.mistakeRate}"
-                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
-                                    </div>
+
+                                <!-- Rate-specific -->
+                                <div id="mistake-rate-row" style="display:${config.mistakeMode === 'rate' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Her kaç kelimede bir</span>
+                                    <input type="number" id="mistake-rate-input" min="2" max="20" value="${config.mistakeRate}"
+                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
                                 </div>
-                                <div id="mistake-chance-control" style="display:${config.mistakeMode === 'custom' ? 'block' : 'none'};">
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata yapma ihtimali</span>
-                                        <input type="number" id="mistake-chance-input" min="0" max="100" value="${config.mistakeChance}"
-                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
-                                    </div>
-                                    <div style="font-size:10px; color:rgba(255,255,255,0.4); line-height:1.4; margin-bottom:8px;">
-                                        <strong>%<span id="mistake-chance-display">${config.mistakeChance}</span></strong> ihtimalle hata yapılır
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Silme sayısı</span>
-                                        <input type="number" id="mistake-delete-count-input" min="1" max="10" value="${config.mistakeDeleteCount}"
-                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
-                                        <span style="font-size:11px; color:rgba(255,255,255,0.5);">Temizleme ihtimali</span>
-                                        <input type="number" id="mistake-clear-chance-input" min="0" max="100" value="${config.mistakeClearChance}"
-                                            style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
-                                            border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
-                                    </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                                        <label style="font-size:11px; color:rgba(255,255,255,0.5);">Doğrusunu yaz</label>
-                                        <label class="ios-switch">
-                                            <input type="checkbox" id="mistake-rewrite-toggle" ${config.mistakeRewriteCorrect ? 'checked' : ''}>
-                                            <span class="ios-slider"></span>
-                                        </label>
-                                    </div>
+
+                                <!-- Chance-specific -->
+                                <div id="mistake-chance-row" style="display:${config.mistakeMode === 'chance' ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Hata ihtimali (%)</span>
+                                    <input type="number" id="mistake-chance-input" min="1" max="100" value="${config.mistakeChance}"
+                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
                                 </div>
-                                <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.3; margin-top:6px; font-style:italic;">
-                                    <div style="margin-bottom:3px;"><strong>Basit:</strong> Sadece takip edilir</div>
-                                    <div style="margin-bottom:3px;"><strong>Gelişmiş:</strong> Hata yazar, %70 düzeltir</div>
-                                    <div><strong>Özel:</strong> İhtimal bazlı hata yapma</div>
+
+                                <!-- Common: correction chance + delete count -->
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Düzeltme ihtimali (%)</span>
+                                    <input type="number" id="mistake-clear-chance-input" min="0" max="100" value="${config.mistakeClearChance}"
+                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+                                    <span style="font-size:11px; color:rgba(255,255,255,0.5);">Silme sayısı (1–5)</span>
+                                    <input type="number" id="mistake-delete-count-input" min="1" max="5" value="${config.mistakeDeleteCount}"
+                                        style="width:50px; padding:4px 8px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); 
+                                        border-radius:6px; color:#ffffff; font-size:11px; font-weight:600; text-align:center;">
+                                </div>
+
+                                <div style="font-size:9px; color:rgba(255,255,255,0.35); line-height:1.4; margin-top:4px; font-style:italic;">
+                                    <strong>Her X kelimede:</strong> tam düzenli aralıklarla.<br>
+                                    <strong>İhtimal:</strong> her kelimede bağımsız şans.
                                 </div>
                             </div>
                         </div>
@@ -1634,66 +1632,46 @@
             config.mistakeMode = this.value;
             localStorage.setItem('katip-mistake-mode', this.value);
             const controls = document.getElementById('mistake-controls');
-            const rateControl = document.getElementById('mistake-rate-control');
-            const chanceControl = document.getElementById('mistake-chance-control');
+            const rateRow = document.getElementById('mistake-rate-row');
+            const chanceRow = document.getElementById('mistake-chance-row');
             const analysisSection = document.getElementById('mistake-analysis-section');
-            
+
             controls.style.display = this.value !== 'none' ? 'block' : 'none';
             if (analysisSection) analysisSection.style.display = this.value !== 'none' ? 'block' : 'none';
-            
-            if (this.value === 'basic' || this.value === 'advanced') {
-                rateControl.style.display = 'block';
-                chanceControl.style.display = 'none';
-            } else if (this.value === 'custom') {
-                rateControl.style.display = 'none';
-                chanceControl.style.display = 'block';
-            }
-            
+
+            if (rateRow)   rateRow.style.display   = this.value === 'rate'   ? 'flex' : 'none';
+            if (chanceRow) chanceRow.style.display = this.value === 'chance' ? 'flex' : 'none';
+
             // Refresh chart when mode changes
             updateMistakeChart();
             logger(`Hata modu: ${this.value}`);
         };
-        
-        // Mistake rate input
+
+        // Mistake rate input (rate mode)
         const mistakeRateInput = document.getElementById('mistake-rate-input');
         mistakeRateInput.oninput = function() {
             let value = parseInt(this.value);
             if (isNaN(value) || value < 2) value = 2;
-            if (value > 10) value = 10;
+            if (value > 20) value = 20;
             this.value = value;
             config.mistakeRate = value;
             localStorage.setItem('katip-mistake-rate', value);
         };
 
-        // Mistake chance input
+        // Mistake chance input (chance mode)
         const mistakeChanceInput = document.getElementById('mistake-chance-input');
-        const mistakeChanceDisplay = document.getElementById('mistake-chance-display');
-        mistakeChanceInput.oninput = function() {
-            let value = parseInt(this.value);
-            if (isNaN(value) || value < 0) value = 0;
-            if (value > 100) value = 100;
-            this.value = value;
-            config.mistakeChance = value;
-            localStorage.setItem('katip-mistake-chance', value);
-            if (mistakeChanceDisplay) {
-                mistakeChanceDisplay.innerText = value;
-            }
-        };
-        
-        // Mistake delete count input
-        const mistakeDeleteCountInput = document.getElementById('mistake-delete-count-input');
-        if (mistakeDeleteCountInput) {
-            mistakeDeleteCountInput.oninput = function() {
+        if (mistakeChanceInput) {
+            mistakeChanceInput.oninput = function() {
                 let value = parseInt(this.value);
                 if (isNaN(value) || value < 1) value = 1;
-                if (value > 10) value = 10;
+                if (value > 100) value = 100;
                 this.value = value;
-                config.mistakeDeleteCount = value;
-                localStorage.setItem('katip-mistake-delete-count', value);
+                config.mistakeChance = value;
+                localStorage.setItem('katip-mistake-chance', value);
             };
         }
-        
-        // Mistake clear chance input
+
+        // Correction chance input (both modes)
         const mistakeClearChanceInput = document.getElementById('mistake-clear-chance-input');
         if (mistakeClearChanceInput) {
             mistakeClearChanceInput.oninput = function() {
@@ -1705,14 +1683,17 @@
                 localStorage.setItem('katip-mistake-clear-chance', value);
             };
         }
-        
-        // Mistake rewrite toggle
-        const mistakeRewriteToggle = document.getElementById('mistake-rewrite-toggle');
-        if (mistakeRewriteToggle) {
-            mistakeRewriteToggle.onchange = function() {
-                config.mistakeRewriteCorrect = this.checked;
-                localStorage.setItem('katip-mistake-rewrite', String(this.checked));
-                logger(`Doğrusunu yazma modu ${this.checked ? 'aktif' : 'deaktif'}`);
+
+        // Delete count input (both modes)
+        const mistakeDeleteCountInput = document.getElementById('mistake-delete-count-input');
+        if (mistakeDeleteCountInput) {
+            mistakeDeleteCountInput.oninput = function() {
+                let value = parseInt(this.value);
+                if (isNaN(value) || value < 1) value = 1;
+                if (value > 5) value = 5;
+                this.value = value;
+                config.mistakeDeleteCount = value;
+                localStorage.setItem('katip-mistake-delete-count', value);
             };
         }
 
