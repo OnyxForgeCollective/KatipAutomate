@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         <<KatipOnlineFucker>>
 // @namespace    http://tampermonkey.net/
-// @version      v2.6
+// @version      v2.7
 // @description  Katiponline sitesi için oluşturulan robotize yazım scripti.
 // @author       PrescionX
 // @match        *://*.katiponline.xyz/*
@@ -182,9 +182,11 @@
 
     async function doTypoMistake(element, word, pos) {
         for (let i = 0; i < pos; i++) {
+            if (!config.active) return true;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
+        if (!config.active) return true;
         const typo = generateTypo(word[pos]);
         simulateKey(element, typo);
         await sleep(getHumanLikeDelay());
@@ -194,17 +196,20 @@
             await sleep(200 + Math.random() * 300);
             const deleteCount = Math.min(config.mistakeDeleteCount, pos + 1);
             for (let i = 0; i < deleteCount; i++) {
+                if (!config.active) return shouldCorrect;
                 simulateBackspace(element);
                 await sleep(getHumanLikeDelay());
             }
             // Retype the characters we deleted
             const startPos = Math.max(0, pos - deleteCount + 1);
             for (let i = startPos; i <= pos; i++) {
+                if (!config.active) return shouldCorrect;
                 simulateKey(element, word[i]);
                 await sleep(getHumanLikeDelay());
             }
         }
         for (let i = pos + 1; i < word.length; i++) {
+            if (!config.active) return shouldCorrect;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
@@ -214,27 +219,35 @@
     async function doTranspositionMistake(element, word, pos) {
         // Type chars before pos
         for (let i = 0; i < pos; i++) {
+            if (!config.active) return true;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
         // Swap: type word[pos+1] before word[pos]
+        if (!config.active) return true;
         simulateKey(element, word[pos + 1]);
         await sleep(getHumanLikeDelay());
+        if (!config.active) return true;
         simulateKey(element, word[pos]);
         await sleep(getHumanLikeDelay());
         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
         if (shouldCorrect) {
             await sleep(150 + Math.random() * 200);
+            if (!config.active) return shouldCorrect;
             simulateBackspace(element);
             await sleep(getHumanLikeDelay());
+            if (!config.active) return shouldCorrect;
             simulateBackspace(element);
             await sleep(getHumanLikeDelay());
+            if (!config.active) return shouldCorrect;
             simulateKey(element, word[pos]);
             await sleep(getHumanLikeDelay());
+            if (!config.active) return shouldCorrect;
             simulateKey(element, word[pos + 1]);
             await sleep(getHumanLikeDelay());
         }
         for (let i = pos + 2; i < word.length; i++) {
+            if (!config.active) return shouldCorrect;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
@@ -244,19 +257,23 @@
     async function doDoubleMistake(element, word, pos) {
         // Type word[0..pos] normally
         for (let i = 0; i <= pos; i++) {
+            if (!config.active) return true;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
         // Type word[pos] a second time (double-key)
+        if (!config.active) return true;
         simulateKey(element, word[pos]);
         await sleep(getHumanLikeDelay());
         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
         if (shouldCorrect) {
             await sleep(150 + Math.random() * 200);
+            if (!config.active) return shouldCorrect;
             simulateBackspace(element);
             await sleep(getHumanLikeDelay());
         }
         for (let i = pos + 1; i < word.length; i++) {
+            if (!config.active) return shouldCorrect;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
@@ -266,29 +283,36 @@
     async function doSkipMistake(element, word, pos) {
         // Type chars before pos
         for (let i = 0; i < pos; i++) {
+            if (!config.active) return true;
             simulateKey(element, word[i]);
             await sleep(getHumanLikeDelay());
         }
         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
         if (pos + 1 < word.length) {
             // Accidentally type word[pos+1] first (skip pos)
+            if (!config.active) return shouldCorrect;
             simulateKey(element, word[pos + 1]);
             await sleep(getHumanLikeDelay());
             if (shouldCorrect) {
                 await sleep(150 + Math.random() * 200);
+                if (!config.active) return shouldCorrect;
                 simulateBackspace(element);
                 await sleep(getHumanLikeDelay());
                 // Insert the skipped char, then re-type the one we just backspaced
+                if (!config.active) return shouldCorrect;
                 simulateKey(element, word[pos]);
                 await sleep(getHumanLikeDelay());
+                if (!config.active) return shouldCorrect;
                 simulateKey(element, word[pos + 1]);
                 await sleep(getHumanLikeDelay());
                 for (let i = pos + 2; i < word.length; i++) {
+                    if (!config.active) return shouldCorrect;
                     simulateKey(element, word[i]);
                     await sleep(getHumanLikeDelay());
                 }
             } else {
                 for (let i = pos + 2; i < word.length; i++) {
+                    if (!config.active) return shouldCorrect;
                     simulateKey(element, word[i]);
                     await sleep(getHumanLikeDelay());
                 }
@@ -769,107 +793,126 @@
         input.removeAttribute('disabled');
         input.focus();
 
-        logger('Düello Döngüsü başlıyor...');
-
-        // Resume: pre-initialise wordCount from already-typed content
+        // ── Resume: derive position state from already-typed content ──────────────
+        // wordCount = number of fully-completed words already in input.value.
+        // A word is "complete" when it is followed by whitespace.
         let wordCount = 0;
-        if (input.value) {
-            const typedWords = input.value.trim().split(/\s+/).filter(Boolean);
-            // Completed words = all words if ends with space, else all but the last (in-progress)
-            wordCount = /\s$/.test(input.value) ? typedWords.length : Math.max(0, typedWords.length - 1);
-            // Sync stats so next-mistake prediction uses the correct base
-            stats.totalWords = wordCount;
-            stats.mistakeWordCount = wordCount;
+        {
+            const v = input.value;
+            if (v) {
+                const words = v.trim().split(/\s+/).filter(Boolean);
+                wordCount = /\s$/.test(v) ? words.length : Math.max(0, words.length - 1);
+                stats.totalWords = wordCount;
+                stats.mistakeWordCount = wordCount;
+            }
+            // Fix lastCharWasSpace (startStatsTracking always resets it to true)
+            if (v.length > 0) lastCharWasSpace = /\s/.test(v[v.length - 1]);
         }
 
-        // Resume mid-word: initialise currentWord to the partial word already typed so that
-        // the first character we type won't look like "start of new word" and trigger a mistake.
-        let currentWord = '';
-        if (input.value && !/\s$/.test(input.value)) {
-            const parts = input.value.split(/\s+/);
-            currentWord = parts[parts.length - 1] || '';
-        }
-
-        // Fix lastCharWasSpace after startStatsTracking reset it to true regardless of position
-        if (input.value.length > 0) {
-            const last = input.value[input.value.length - 1];
-            lastCharWasSpace = /\s/.test(last);
-        }
+        logger(`Döngü başlıyor – pos=${input.value.length}, tamamlanan kelime=${wordCount}`);
 
         while (config.active) {
             const sourceText = source.value;
-            const currentVal = input.value;
 
-            if (!sourceText || sourceText.length === 0) {
-                await sleep(500);
+            if (!sourceText) {
+                await sleep(300);
                 continue;
             }
 
-            if (currentVal.length >= sourceText.length) {
-                logger('Metin bitti.');
+            // ── Single source-of-truth cursor: always re-read length ──────────────
+            const pos = input.value.length;
+
+            // Guard: position must not exceed source length
+            if (pos > sourceText.length) {
+                logger(`UYARI: pozisyon (${pos}) kaynak uzunluğunu (${sourceText.length}) aşıyor – durduruluyor.`, 'warn');
                 stopBot();
                 break;
             }
 
-            let charToType = sourceText[currentVal.length];
-            if (charToType.charCodeAt(0) === 160) charToType = " ";
-            
-            const isSpace = (charToType === ' ' || charToType === '\n' || charToType === '\t');
-            
-            // Handle word-based mistakes
-            if (isSpace && currentWord.length > 0) {
-                // Track this correctly-typed word for the chart (no mistake)
-                stats.wordHistory.push({ word: currentWord, hadMistake: false, mistakeType: null, corrected: false });
-                if (stats.wordHistory.length > 30) stats.wordHistory.shift();
-                wordCount++;
-                stats.mistakeWordCount = wordCount;
-                currentWord = '';
-            } else if (!isSpace) {
-                currentWord += charToType;
+            if (pos >= sourceText.length) {
+                logger('Metin tamamlandı.');
+                stopBot();
+                break;
+            }
 
-                // At the very first character of a word, decide whether to make a mistake
-                if (currentWord.length === 1 && shouldMakeMistake(wordCount)) {
-                    const remainingWord = sourceText.slice(currentVal.length).split(/[\s\n\t]/)[0];
-                    if (remainingWord.length >= MIN_WORD_LEN_FOR_MISTAKE) {
-                        logger(`Hata yapılıyor: ${remainingWord}`);
-                        const preMistakeLength = currentVal.length;
-                        await typeWithMistake(input, remainingWord);
-                        // Snap position: uncorrected double (+1) or skip (-1) mistakes leave wrong length.
-                        // Backspace any surplus characters silently.
-                        const expectedLength = preMistakeLength + remainingWord.length;
-                        while (input.value.length > expectedLength) {
+            // Next character to type (convert non-breaking space to normal space)
+            let ch = sourceText[pos];
+            if (ch.charCodeAt(0) === 160) ch = ' ';
+            const isSpace = /\s/.test(ch);
+
+            // ── Word-boundary mistake trigger ─────────────────────────────────────
+            // atWordStart: pos is the first character of a new word
+            const atWordStart = pos === 0 || /\s/.test(sourceText[pos - 1]);
+
+            if (!isSpace && atWordStart && shouldMakeMistake(wordCount)) {
+                // Extract the full word starting at pos
+                const word = sourceText.slice(pos).split(/[\s\n\t]/)[0];
+                if (word.length >= MIN_WORD_LEN_FOR_MISTAKE) {
+                    logger(`Hata yapılıyor: "${word}" (kelime #${wordCount + 1})`);
+                    await typeWithMistake(input, word);
+
+                    // ── Position snap ─────────────────────────────────────────────
+                    // typeWithMistake may leave input.value.length off by ±1 for
+                    // uncorrected double (+1) or skip (-1) mistakes.  Fix it here.
+                    const targetLen = pos + word.length;
+                    if (input.value.length !== targetLen) {
+                        logger(`Pozisyon snap: ${input.value.length} → ${targetLen}`);
+                        while (input.value.length > targetLen) {
                             simulateBackspace(input);
                         }
-                        // If somehow shorter (skip uncorrected), fill from sourceText.
-                        while (input.value.length < expectedLength && input.value.length < sourceText.length) {
-                            simulateKey(input, sourceText[input.value.length]);
+                        // For a short-fall, fill from sourceText (same position arithmetic)
+                        while (input.value.length < targetLen && input.value.length < sourceText.length) {
+                            // Type the character that SHOULD be at this position in the word
+                            const fillIdx = input.value.length - pos; // index within `word`
+                            simulateKey(input, fillIdx < word.length ? word[fillIdx] : sourceText[input.value.length]);
                         }
-                        // Track this mistake word
-                        const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
-                        stats.wordHistory.push({
-                            word: remainingWord,
-                            hadMistake: true,
-                            mistakeType: lastM && lastM.word === remainingWord ? lastM.mistakeType : 'typo',
-                            corrected: lastM && lastM.word === remainingWord ? lastM.corrected : false,
-                        });
-                        if (stats.wordHistory.length > 30) stats.wordHistory.shift();
-                        wordCount++;
-                        stats.mistakeWordCount = wordCount;
-                        currentWord = '';
-                        continue;
                     }
+
+                    // Track word in history
+                    const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
+                    stats.wordHistory.push({
+                        word,
+                        hadMistake: true,
+                        mistakeType: lastM && lastM.word === word ? lastM.mistakeType : 'typo',
+                        corrected:   lastM && lastM.word === word ? lastM.corrected   : false,
+                    });
+                    if (stats.wordHistory.length > 30) stats.wordHistory.shift();
+
+                    wordCount++;
+                    stats.mistakeWordCount = wordCount;
+                    stats.lastWord = word;
+                    stats.lastWordCorrect = false;
+                    continue; // next iteration reads fresh pos from input.value.length
                 }
             }
 
-            simulateKey(input, charToType);
-            
-            // Use human-like delay with random pauses
-            const delay = getHumanLikeDelay();
-            await sleep(delay);
-            
-            if (shouldAddRandomPause()) {
-                await sleep(getRandomPauseDelay());
+            // ── Normal character type ─────────────────────────────────────────────
+            simulateKey(input, ch);
+
+            // Track word completion: a space typed after a non-space character
+            // means the preceding word just finished.
+            if (isSpace && pos > 0 && !/\s/.test(sourceText[pos - 1])) {
+                // Walk back to find the start of the just-completed word
+                let wordStart = pos - 1;
+                while (wordStart > 0 && !/\s/.test(sourceText[wordStart - 1])) wordStart--;
+                const completedWord = sourceText.slice(wordStart, pos);
+
+                stats.wordHistory.push({
+                    word: completedWord,
+                    hadMistake: false,
+                    mistakeType: null,
+                    corrected: false,
+                });
+                if (stats.wordHistory.length > 30) stats.wordHistory.shift();
+
+                wordCount++;
+                stats.mistakeWordCount = wordCount;
+                stats.lastWord = completedWord;
+                stats.lastWordCorrect = true;
             }
+
+            await sleep(getHumanLikeDelay());
+            if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
         }
     }
 
@@ -979,8 +1022,20 @@
         input.focus();
 
         logger('Hız Testi Döngüsü başlıyor...');
-        
+
+        // ── Resume: compute wordCount from already-typed content ──────────────────
+        // This ensures the mistake trigger fires at the correct cadence even if the
+        // bot was stopped and restarted mid-session.
         let wordCount = 0;
+        {
+            const v = input.value;
+            if (v) {
+                const words = v.trim().split(/\s+/).filter(Boolean);
+                // A trailing space means the last word is fully complete
+                wordCount = /\s$/.test(v) ? words.length : Math.max(0, words.length - 1);
+                stats.mistakeWordCount = wordCount;
+            }
+        }
 
         while (config.active) {
             const activeWordSpan = source.querySelector('.golge');
@@ -992,22 +1047,50 @@
             }
 
             const wordToType = activeWordSpan.textContent.trim();
-            logger(`Kelime yazılıyor: ${wordToType}`);
-            
-            // Decide whether to make a mistake on this word
-            const makeMistake = shouldMakeMistake(wordCount) && wordToType.length >= MIN_WORD_LEN_FOR_MISTAKE;
+            if (!wordToType) {
+                await sleep(200);
+                continue;
+            }
+
+            logger(`Kelime yazılıyor: "${wordToType}" (kelime #${wordCount + 1})`);
+
+            // ── Resume partial-word fix ───────────────────────────────────────────
+            // If the bot was stopped mid-word, input.value may already end with a
+            // prefix of wordToType (e.g. "bro" when word is "brown").  Skip those
+            // characters so we don't duplicate them and create "brobrown".
+            let startCharIdx = 0;
+            {
+                const inputVal = input.value;
+                if (inputVal && !/\s$/.test(inputVal)) {
+                    // Last token (content after the last space) is the partial word
+                    const lastSpaceIdx = inputVal.lastIndexOf(' ');
+                    const lastPart = lastSpaceIdx >= 0 ? inputVal.slice(lastSpaceIdx + 1) : inputVal;
+                    if (lastPart.length > 0 &&
+                        lastPart.length < wordToType.length &&
+                        wordToType.startsWith(lastPart)) {
+                        startCharIdx = lastPart.length;
+                        logger(`Kelime devam ettiriliyor: "${wordToType}" (${startCharIdx} karakter atlandı)`);
+                    }
+                }
+            }
+
+            // Only attempt a mistake at the very start of the word (not on resume continuation)
+            const makeMistake = startCharIdx === 0 &&
+                shouldMakeMistake(wordCount) &&
+                wordToType.length >= MIN_WORD_LEN_FOR_MISTAKE;
 
             let wordWasCorrect = true;
             if (makeMistake) {
                 wordWasCorrect = await typeWithMistake(input, wordToType);
             } else {
-                for (let i = 0; i < wordToType.length; i++) {
+                for (let i = startCharIdx; i < wordToType.length; i++) {
                     if (!config.active) break;
                     simulateKey(input, wordToType[i]);
-                    const delay = getHumanLikeDelay();
-                    await sleep(delay);
+                    await sleep(getHumanLikeDelay());
                 }
             }
+
+            if (!config.active) break;
 
             // Track word in history for mistake chart
             const lastM = makeMistake ? stats.mistakeHistory[stats.mistakeHistory.length - 1] : null;
@@ -1019,31 +1102,22 @@
             });
             if (stats.wordHistory.length > 30) stats.wordHistory.shift();
 
-            // Track last word and whether it was correct
             stats.lastWord = wordToType;
             stats.lastWordCorrect = !makeMistake || wordWasCorrect;
-            
-            // Immediately update the display for last word
+
             const lastWordDisplay = document.getElementById('last-word-display');
-            const lastWordStatus = document.getElementById('last-word-status');
-            if (lastWordDisplay) {
-                lastWordDisplay.innerText = stats.lastWord || '—';
-            }
+            const lastWordStatus  = document.getElementById('last-word-status');
+            if (lastWordDisplay) lastWordDisplay.innerText = stats.lastWord || '—';
             if (lastWordStatus) {
                 lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
                 lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
             }
 
-            if (config.active) {
-                simulateKey(input, ' ');
-                const delay = getHumanLikeDelay();
-                await sleep(delay + 30);
-                
-                if (shouldAddRandomPause()) {
-                    await sleep(getRandomPauseDelay());
-                }
-            }
-            
+            // Type the space to advance the game to the next word
+            simulateKey(input, ' ');
+            await sleep(getHumanLikeDelay() + 30);
+            if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
+
             wordCount++;
             stats.mistakeWordCount = wordCount;
         }
