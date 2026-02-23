@@ -382,7 +382,8 @@
         }
         // Next-mistake prediction
         if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
-            const wordsToNext = config.mistakeRate - (stats.totalWords % config.mistakeRate);
+            const rem = stats.totalWords % config.mistakeRate;
+            const wordsToNext = rem === 0 ? 0 : config.mistakeRate - rem;
             if (wordsToNext <= 2) {
                 text += ` ⚡ <strong>Hata bekleniyor!</strong>`;
             } else {
@@ -407,8 +408,9 @@
         if (correctedEl) correctedEl.innerText = stats.correctedMistakes;
         if (nextPredEl) {
             if (config.mistakeMode === 'basic' || config.mistakeMode === 'advanced') {
-                const n = config.mistakeRate - (stats.totalWords % config.mistakeRate);
-                nextPredEl.innerText = n + ' kelime';
+                const rem = stats.totalWords % config.mistakeRate;
+                const n = rem === 0 ? 0 : config.mistakeRate - rem;
+                nextPredEl.innerText = n === 0 ? '⚡ şimdi!' : n + ' kelime';
             } else if (config.mistakeMode === 'custom') {
                 nextPredEl.innerText = '%' + config.mistakeChance;
             } else {
@@ -743,10 +745,10 @@
             const typedWords = input.value.trim().split(/\s+/).filter(Boolean);
             // If the last char is a non-space, that word is still in progress
             wordCount = /\s$/.test(input.value) ? typedWords.length : Math.max(0, typedWords.length - 1);
+            // Sync stats so next-mistake prediction uses the correct base
+            stats.totalWords = wordCount;
         }
         let currentWord = '';
-        let currentWordHadMistake = false;
-        let currentWordMistakeType = null;
 
         while (config.active) {
             const sourceText = source.value;
@@ -770,16 +772,9 @@
             
             // Handle word-based mistakes
             if (isSpace && currentWord.length > 0) {
-                // Track the completed word for the chart
-                stats.wordHistory.push({
-                    word: currentWord,
-                    hadMistake: currentWordHadMistake,
-                    mistakeType: currentWordMistakeType,
-                    corrected: false,
-                });
+                // Track this correctly-typed word for the chart (no mistake)
+                stats.wordHistory.push({ word: currentWord, hadMistake: false, mistakeType: null, corrected: false });
                 if (stats.wordHistory.length > 30) stats.wordHistory.shift();
-                currentWordHadMistake = false;
-                currentWordMistakeType = null;
                 wordCount++;
                 currentWord = '';
             } else if (!isSpace) {
@@ -799,19 +794,17 @@
                     if (remainingWord.length > 2) {
                         logger(`Making mistake on word: ${remainingWord}`);
                         await typeWithMistake(input, remainingWord);
-                        // Track the mistake word
+                        // Track the mistake word (typeWithMistake already pushed to mistakeHistory)
                         const lastM = stats.mistakeHistory[stats.mistakeHistory.length - 1];
                         stats.wordHistory.push({
                             word: remainingWord,
                             hadMistake: true,
-                            mistakeType: lastM ? lastM.mistakeType : 'typo',
-                            corrected: lastM ? lastM.corrected : false,
+                            mistakeType: lastM && lastM.word === remainingWord ? lastM.mistakeType : 'typo',
+                            corrected: lastM && lastM.word === remainingWord ? lastM.corrected : false,
                         });
                         if (stats.wordHistory.length > 30) stats.wordHistory.shift();
                         wordCount++;
                         currentWord = '';
-                        currentWordHadMistake = false;
-                        currentWordMistakeType = null;
                         continue;
                     }
                 }
@@ -849,12 +842,25 @@
                 continue;
             }
 
-            // Resume: on first run, skip spans already covered by existing input
-            const startIndex = firstIteration ? Math.min(input.value.length, spans.length) : 0;
+            // Resume: on first run, skip spans already covered by existing input.
+            // Accumulate span text lengths (each span is usually 1 char, but we handle
+            // multi-char or empty spans safely) until we match input.value.length.
+            let startIndex = 0;
+            if (firstIteration && input.value.length > 0) {
+                let accumulated = 0;
+                for (let j = 0; j < spans.length; j++) {
+                    const t = spans[j].textContent;
+                    accumulated += (t === '' || t.charCodeAt(0) === 160) ? 1 : t.length;
+                    if (accumulated >= input.value.length) {
+                        startIndex = j + 1;
+                        break;
+                    }
+                }
+            }
             firstIteration = false;
 
             if (startIndex > 0) {
-                logger(`Ders modu: ${startIndex} karakter atlandı (kaldığı yerden devam).`);
+                logger(`Ders modu: ${startIndex} span atlandı (kaldığı yerden devam).`);
             }
             logger(`Ders modu: ${spans.length} karakter bulundu.`);
 
@@ -1321,9 +1327,6 @@
                             <div style="display:flex; align-items:center; gap:3px;">
                                 <div style="width:8px; height:8px; background:#ff453a; border-radius:2px;"></div>
                                 <span style="font-size:8px; color:rgba(255,255,255,0.4);">Hatalı bırakıldı</span>
-                            </div>
-                            <div style="display:flex; align-items:center; gap:3px; margin-left:auto; font-size:8px; color:rgba(255,255,255,0.3);">
-                                Y: yanlış tuş &nbsp;|&nbsp; YD: yer değ. &nbsp;|&nbsp; ÇH: çift harf &nbsp;|&nbsp; HA: harf atl.
                             </div>
                         </div>
                     </div>
