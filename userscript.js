@@ -39,6 +39,7 @@
         mistakeEveryWords: parseInt(localStorage.getItem('katip-mistake-every-words')) || 5,
         mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 30,
         mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70,
+        mistakeDeleteCount: parseInt(localStorage.getItem('katip-mistake-delete-count')) || 2,
 
         // --- UI Settings ---
         panelTop: localStorage.getItem('katip-panel-top') || '50px',
@@ -399,6 +400,17 @@
             cancelable: true
         };
 
+        // Mevcut değeri olaylar tetiklenmeden önce sakla
+        const valueBeforeEvents = (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT')
+            ? element.value
+            : element.textContent;
+
+        // Olayları göndermeden önce imleci metnin sonuna sabitle
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            element.selectionStart = valueBeforeEvents.length;
+            element.selectionEnd   = valueBeforeEvents.length;
+        }
+
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
 
@@ -407,12 +419,15 @@
                 Object.getPrototypeOf(element), "value"
             );
             if (nativeSetter && nativeSetter.set) {
-                nativeSetter.set.call(element, element.value.slice(0, -1));
+                nativeSetter.set.call(element, valueBeforeEvents.slice(0, -1));
             } else {
-                element.value = element.value.slice(0, -1);
+                element.value = valueBeforeEvents.slice(0, -1);
             }
+            // Değer atandıktan sonra imleci sona sabitle
+            element.selectionStart = element.value.length;
+            element.selectionEnd   = element.value.length;
         } else {
-            element.textContent = element.textContent.slice(0, -1);
+            element.textContent = valueBeforeEvents.slice(0, -1);
         }
 
         element.dispatchEvent(new InputEvent('input', { data: null, bubbles: true }));
@@ -743,6 +758,20 @@
             cancelable: true
         };
 
+        // Mevcut değeri olaylar tetiklenmeden önce sakla (site handler'ları değeri
+        // keydown/keypress sırasında değiştirirse çift karakter yazımını önler)
+        const valueBeforeEvents = (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT')
+            ? element.value
+            : element.textContent;
+
+        // Kullanıcı textarea'ya tıklayıp imleci ortaya taşımış olabilir; site'in
+        // keydown handler'ı imlecin bulunduğu konuma karakter ekler.  Bunu önlemek
+        // için olayları göndermeden önce imleci her zaman metnin sonuna sabitle.
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            element.selectionStart = valueBeforeEvents.length;
+            element.selectionEnd   = valueBeforeEvents.length;
+        }
+
         // Tuş basma eventleri
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
@@ -753,13 +782,16 @@
                 Object.getPrototypeOf(element), "value"
             );
             if (nativeSetter && nativeSetter.set) {
-                nativeSetter.set.call(element, element.value + key);
+                nativeSetter.set.call(element, valueBeforeEvents + key);
             } else {
-                element.value += key;
+                element.value = valueBeforeEvents + key;
             }
+            // Değer atandıktan sonra imleci sona sabitle
+            element.selectionStart = element.value.length;
+            element.selectionEnd   = element.value.length;
         } else {
             // Eğer element bir div veya span ise (contenteditable)
-            element.textContent += key;
+            element.textContent = valueBeforeEvents + key;
         }
 
         // Input ve tuş bırakma eventleri
@@ -808,14 +840,19 @@
                 const currentVal = input.value;
                 let errorFoundIndex = -1;
 
-                // Metni baştan sona (veya mevcut input uzunluğuna kadar) kontrol et
-                for (let i = 0; i < currentVal.length; i++) {
-                    let expectedChar = sourceText[i];
-                    if (expectedChar && expectedChar.charCodeAt(0) === 160) expectedChar = ' ';
+                // Girdi uzunluğu kaynağı aşıyorsa hata var demektir
+                if (currentVal.length > sourceText.length) {
+                    errorFoundIndex = sourceText.length;
+                } else {
+                    // Metni baştan sona (veya mevcut input uzunluğuna kadar) kontrol et
+                    for (let i = 0; i < currentVal.length; i++) {
+                        let expectedChar = sourceText[i];
+                        if (expectedChar && expectedChar.charCodeAt(0) === 160) expectedChar = ' ';
 
-                    if (currentVal[i] !== expectedChar) {
-                        errorFoundIndex = i;
-                        break;
+                        if (currentVal[i] !== expectedChar) {
+                            errorFoundIndex = i;
+                            break;
+                        }
                     }
                 }
 
@@ -972,6 +1009,7 @@
             logger(`Ders modu: ${spans.length} karakter bulundu.`);
 
             let contentChanged = false;
+            let currentLessonWord = '';
 
             for (let i = startIndex; i < spans.length; i++) {
                 if (!config.active) break;
@@ -986,6 +1024,17 @@
                 let charToType = spans[i].textContent;
                 if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
 
+                // Son kelimeyi takip et
+                if (charToType === ' ') {
+                    if (currentLessonWord) {
+                        stats.lastWord = currentLessonWord;
+                        stats.lastWordCorrect = true;
+                        currentLessonWord = '';
+                    }
+                } else {
+                    currentLessonWord += charToType;
+                }
+
                 simulateKey(input, charToType);
                 if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
 
@@ -998,6 +1047,13 @@
             }
 
             if (!config.active) break;
+
+            // Bölüm sonu: boşlukla bitmiyorsa son kelimeyi kaydet
+            if (currentLessonWord) {
+                stats.lastWord = currentLessonWord;
+                stats.lastWordCorrect = true;
+                currentLessonWord = '';
+            }
 
             if (!contentChanged) {
                 // All spans typed — check for auto-next or wait for the next section to load
@@ -1124,6 +1180,14 @@
                         wordToType.startsWith(lastPart)) {
                         startCharIdx = lastPart.length;
                         logger(`Kelime devam ettiriliyor: "${wordToType}" (${startCharIdx} karakter atlandı)`);
+                    } else if (lastPart.length > 0 && !wordToType.startsWith(lastPart)) {
+                        // Partial doesn't match — clear it before retyping
+                        logger(`Hatalı kısmi kelime temizleniyor: "${lastPart}"`);
+                        for (let b = 0; b < lastPart.length; b++) {
+                            if (!config.active) break;
+                            simulateBackspace(input);
+                            await sleep(getHumanLikeDelay() * 0.5);
+                        }
                     }
                 }
             }
@@ -1248,21 +1312,21 @@
 
         const cssVars = `
             :root {
-                --katip-bg: ${isDarkMode ? '#1a1a1a' : '#ffffff'};
-                --katip-bg-sec: ${isDarkMode ? '#2d2d2d' : '#f4f4f4'};
-                --katip-text: ${isDarkMode ? '#ffffff' : '#111111'};
-                --katip-text-muted: ${isDarkMode ? '#a0a0a0' : '#666666'};
-                --katip-border: ${isDarkMode ? '#404040' : '#e0e0e0'};
-                --katip-input-bg: ${isDarkMode ? '#333333' : '#ffffff'};
+                --katip-bg: ${isDarkMode ? '#18181b' : '#ffffff'};
+                --katip-bg-sec: ${isDarkMode ? '#27272a' : '#f8f8fa'};
+                --katip-text: ${isDarkMode ? '#f4f4f5' : '#18181b'};
+                --katip-text-muted: ${isDarkMode ? '#a1a1aa' : '#71717a'};
+                --katip-border: ${isDarkMode ? '#3f3f46' : '#e4e4e7'};
+                --katip-input-bg: ${isDarkMode ? '#3f3f46' : '#ffffff'};
             }
             @media (prefers-color-scheme: dark) {
                 :root {
-                    --katip-bg: #1a1a1a;
-                    --katip-bg-sec: #2d2d2d;
-                    --katip-text: #ffffff;
-                    --katip-text-muted: #a0a0a0;
-                    --katip-border: #404040;
-                    --katip-input-bg: #333333;
+                    --katip-bg: #18181b;
+                    --katip-bg-sec: #27272a;
+                    --katip-text: #f4f4f5;
+                    --katip-text-muted: #a1a1aa;
+                    --katip-border: #3f3f46;
+                    --katip-input-bg: #3f3f46;
                 }
             }
         `;
@@ -1284,47 +1348,54 @@
                     color: var(--katip-text);
                     width: 320px;
                     border: 1px solid var(--katip-border);
-                    border-radius: 6px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    border-radius: 16px;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10);
                     display: ${config.panelMinimized ? 'none' : 'flex'};
                     flex-direction: column;
                     top: ${config.panelTop};
                     left: ${config.panelLeft};
                     overflow: hidden;
-                    transition: opacity 0.2s;
+                    transition: box-shadow 0.25s, opacity 0.25s;
+                }
+                #katip-v12-panel:hover {
+                    box-shadow: 0 12px 40px rgba(0,0,0,0.22), 0 3px 12px rgba(0,0,0,0.12);
                 }
 
                 .katip-header {
                     background: var(--katip-bg-sec);
-                    padding: 10px 14px;
+                    padding: 12px 16px;
                     border-bottom: 1px solid var(--katip-border);
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
                     cursor: move;
                     user-select: none;
+                    border-radius: 16px 16px 0 0;
                 }
 
                 .katip-title {
-                    font-weight: 600;
+                    font-weight: 700;
                     font-size: 14px;
                     display: flex;
                     align-items: center;
                     gap: 8px;
+                    letter-spacing: -0.01em;
                 }
 
                 .katip-badge {
                     background: ${colors.primary};
                     color: white;
-                    padding: 2px 6px;
-                    border-radius: 4px;
+                    padding: 3px 8px;
+                    border-radius: 20px;
                     font-size: 10px;
-                    font-weight: bold;
+                    font-weight: 700;
+                    letter-spacing: 0.02em;
+                    transition: background 0.2s;
                 }
 
                 .katip-controls {
                     display: flex;
-                    gap: 8px;
+                    gap: 6px;
                 }
                 
                 .katip-btn-icon {
@@ -1333,11 +1404,14 @@
                     color: var(--katip-text-muted);
                     cursor: pointer;
                     font-size: 16px;
-                    padding: 4px;
+                    padding: 5px;
+                    width: 28px;
+                    height: 28px;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    border-radius: 4px;
+                    border-radius: 8px;
+                    transition: background 0.15s, color 0.15s;
                 }
                 .katip-btn-icon:hover {
                     background: var(--katip-border);
@@ -1345,29 +1419,47 @@
                 }
 
                 .katip-body {
-                    padding: 14px;
+                    padding: 16px;
                     display: flex;
                     flex-direction: column;
                     gap: 16px;
                     max-height: 80vh;
                     overflow-y: auto;
+                    scrollbar-width: thin;
+                    scrollbar-color: var(--katip-border) transparent;
                 }
+                .katip-body::-webkit-scrollbar { width: 4px; }
+                .katip-body::-webkit-scrollbar-track { background: transparent; }
+                .katip-body::-webkit-scrollbar-thumb { background: var(--katip-border); border-radius: 4px; }
 
                 .katip-main-btn {
                     width: 100%;
-                    padding: 10px;
-                    background: ${colors.primary};
+                    padding: 11px;
+                    background: linear-gradient(135deg, ${colors.primary} 0%, #1a6ef7 100%);
                     color: white;
                     border: none;
-                    border-radius: 4px;
-                    font-weight: 600;
+                    border-radius: 10px;
+                    font-weight: 700;
                     font-size: 14px;
                     cursor: pointer;
-                    transition: background 0.2s;
+                    transition: transform 0.12s, box-shadow 0.18s, background 0.2s;
+                    box-shadow: 0 2px 8px rgba(0,81,195,0.28);
+                    letter-spacing: 0.01em;
                 }
-                .katip-main-btn:hover { background: ${colors.primaryHover}; }
-                .katip-main-btn.active { background: ${colors.danger}; }
-                .katip-main-btn.active:hover { background: ${colors.dangerHover}; }
+                .katip-main-btn:hover {
+                    background: linear-gradient(135deg, ${colors.primaryHover} 0%, #0e59d9 100%);
+                    box-shadow: 0 4px 16px rgba(0,81,195,0.36);
+                    transform: translateY(-1px);
+                }
+                .katip-main-btn:active { transform: translateY(0); }
+                .katip-main-btn.active {
+                    background: linear-gradient(135deg, ${colors.danger} 0%, #f04438 100%);
+                    box-shadow: 0 2px 8px rgba(217,45,32,0.28);
+                }
+                .katip-main-btn.active:hover {
+                    background: linear-gradient(135deg, ${colors.dangerHover} 0%, #d43b2f 100%);
+                    box-shadow: 0 4px 16px rgba(217,45,32,0.36);
+                }
 
                 .katip-stats-grid {
                     display: grid;
@@ -1378,45 +1470,56 @@
                 .katip-stat-box {
                     background: var(--katip-bg-sec);
                     border: 1px solid var(--katip-border);
-                    border-radius: 4px;
-                    padding: 8px;
+                    border-radius: 10px;
+                    padding: 10px;
                     text-align: center;
+                    transition: border-color 0.2s, background 0.2s;
                 }
-                .katip-stat-label { font-size: 10px; color: var(--katip-text-muted); text-transform: uppercase; margin-bottom: 4px; font-weight: 600; }
-                .katip-stat-value { font-size: 16px; font-weight: bold; }
+                .katip-stat-box:hover { border-color: ${colors.primary}44; }
+                .katip-stat-label { font-size: 10px; color: var(--katip-text-muted); text-transform: uppercase; margin-bottom: 4px; font-weight: 700; letter-spacing: 0.05em; }
+                .katip-stat-value { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
 
                 .katip-section {
                     border-top: 1px solid var(--katip-border);
                     padding-top: 14px;
                 }
-                .katip-section-title { font-size: 12px; font-weight: 600; margin-bottom: 10px; color: var(--katip-text-muted); text-transform: uppercase; }
+                .katip-section-title { font-size: 11px; font-weight: 700; margin-bottom: 12px; color: var(--katip-text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 
                 .katip-setting-row {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 10px;
+                    margin-bottom: 12px;
+                    gap: 8px;
                 }
 
-                .katip-setting-label { font-size: 13px; font-weight: 500; }
-                .katip-setting-desc { font-size: 11px; color: var(--katip-text-muted); margin-top: 2px; }
+                .katip-setting-label { font-size: 13px; font-weight: 600; }
+                .katip-setting-desc { font-size: 11px; color: var(--katip-text-muted); margin-top: 2px; line-height: 1.4; }
 
                 .katip-input {
                     background: var(--katip-input-bg);
-                    border: 1px solid var(--katip-border);
+                    border: 1.5px solid var(--katip-border);
                     color: var(--katip-text);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    width: 60px;
+                    padding: 5px 8px;
+                    border-radius: 8px;
+                    width: 64px;
                     text-align: right;
                     font-size: 12px;
+                    font-weight: 600;
+                    transition: border-color 0.15s, box-shadow 0.15s;
+                    outline: none;
+                }
+                .katip-input:focus {
+                    border-color: ${colors.primary};
+                    box-shadow: 0 0 0 3px ${colors.primary}22;
                 }
 
                 .katip-toggle {
                     position: relative;
                     display: inline-block;
-                    width: 36px;
-                    height: 20px;
+                    width: 38px;
+                    height: 22px;
+                    flex-shrink: 0;
                 }
                 .katip-toggle input { opacity: 0; width: 0; height: 0; }
                 .katip-slider {
@@ -1424,21 +1527,22 @@
                     cursor: pointer;
                     top: 0; left: 0; right: 0; bottom: 0;
                     background-color: var(--katip-border);
-                    transition: .2s;
-                    border-radius: 20px;
+                    transition: background 0.22s, box-shadow 0.22s;
+                    border-radius: 22px;
                 }
                 .katip-slider:before {
                     position: absolute;
                     content: "";
-                    height: 14px;
-                    width: 14px;
+                    height: 16px;
+                    width: 16px;
                     left: 3px;
                     bottom: 3px;
                     background-color: white;
-                    transition: .2s;
+                    transition: transform 0.22s cubic-bezier(.4,0,.2,1), box-shadow 0.22s;
                     border-radius: 50%;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.18);
                 }
-                input:checked + .katip-slider { background-color: ${colors.success}; }
+                input:checked + .katip-slider { background-color: ${colors.success}; box-shadow: 0 0 0 3px ${colors.success}22; }
                 input:checked + .katip-slider:before { transform: translateX(16px); }
 
                 /* Logo icon when minimized */
@@ -1448,21 +1552,26 @@
                     top: 50%;
                     left: 0;
                     transform: translateY(-50%);
-                    width: 40px;
-                    height: 40px;
-                    background: ${colors.primary};
+                    width: 42px;
+                    height: 42px;
+                    background: linear-gradient(135deg, ${colors.primary} 0%, #1a6ef7 100%);
                     color: white;
-                    border-radius: 0 6px 6px 0;
+                    border-radius: 0 12px 12px 0;
                     display: ${config.panelMinimized ? 'flex' : 'none'};
                     align-items: center;
                     justify-content: center;
-                    font-weight: bold;
-                    font-size: 16px;
+                    font-weight: 800;
+                    font-size: 13px;
                     cursor: pointer;
-                    box-shadow: 2px 0 8px rgba(0,0,0,0.2);
-                    transition: background 0.2s;
+                    box-shadow: 3px 0 16px rgba(0,81,195,0.32);
+                    transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
+                    letter-spacing: -0.02em;
                 }
-                #katip-icon:hover { background: ${colors.primaryHover}; }
+                #katip-icon:hover {
+                    background: linear-gradient(135deg, ${colors.primaryHover} 0%, #0e59d9 100%);
+                    box-shadow: 3px 0 22px rgba(0,81,195,0.42);
+                    transform: translateY(-50%) scaleX(1.06);
+                }
 
                 /* Range slider */
                 input[type=range] {
@@ -1472,18 +1581,28 @@
                 }
                 input[type=range]::-webkit-slider-thumb {
                     -webkit-appearance: none;
-                    height: 14px; width: 14px;
+                    height: 16px; width: 16px;
                     border-radius: 50%;
                     background: ${colors.primary};
                     cursor: pointer;
-                    margin-top: -5px;
+                    margin-top: -6px;
+                    box-shadow: 0 1px 6px rgba(0,81,195,0.32);
+                    transition: box-shadow 0.15s, transform 0.15s;
+                }
+                input[type=range]::-webkit-slider-thumb:hover {
+                    box-shadow: 0 0 0 6px ${colors.primary}22;
+                    transform: scale(1.15);
                 }
                 input[type=range]::-webkit-slider-runnable-track {
                     width: 100%; height: 4px;
                     cursor: pointer;
                     background: var(--katip-border);
-                    border-radius: 2px;
+                    border-radius: 4px;
                 }
+
+                @keyframes flash-red { 0%,100%{opacity:1} 50%{opacity:0.4} }
+                @keyframes flash-yellow { 0%,100%{opacity:1} 50%{opacity:0.5} }
+                @keyframes flash-orange { 0%,100%{opacity:1} 50%{opacity:0.45} }
             </style>
 
             <div class="katip-header" id="katip-header">
@@ -1577,17 +1696,17 @@
                     </div>
 
                     <div id="mistake-config-area" style="display: ${config.mistakeModeEnabled ? 'block' : 'none'};">
-                        <div style="font-size: 12px; background: var(--katip-bg-sec); padding: 10px; border-radius: 4px; border: 1px solid var(--katip-border); margin-bottom: 10px; line-height: 1.5;">
+                        <div style="font-size: 12px; background: var(--katip-bg-sec); padding: 12px; border-radius: 10px; border: 1px solid var(--katip-border); margin-bottom: 10px; line-height: 1.8;">
                             Her
-                            <input type="number" id="m-words" class="katip-input" style="width:40px; padding:2px; display:inline;" value="${config.mistakeEveryWords}" min="1">
+                            <input type="number" id="m-words" class="katip-input" style="width:44px; padding:3px 4px; display:inline-block; vertical-align:middle;" value="${config.mistakeEveryWords}" min="1">
                             kelimeden birisi,<br> %
-                            <input type="number" id="m-chance" class="katip-input" style="width:40px; padding:2px; display:inline;" value="${config.mistakeChance}" min="1" max="100">
+                            <input type="number" id="m-chance" class="katip-input" style="width:44px; padding:3px 4px; display:inline-block; vertical-align:middle;" value="${config.mistakeChance}" min="1" max="100">
                             ihtimalle hatalı olsun.<br>
                             Yapılan hata %
-                            <input type="number" id="m-clear" class="katip-input" style="width:40px; padding:2px; display:inline;" value="${config.mistakeClearChance}" min="0" max="100">
+                            <input type="number" id="m-clear" class="katip-input" style="width:44px; padding:3px 4px; display:inline-block; vertical-align:middle;" value="${config.mistakeClearChance}" min="0" max="100">
                             ihtimalle düzeltilsin.
                         </div>
-                        <div id="mistake-summary" style="font-size:11px; color:var(--katip-text-muted); text-align:center;">
+                        <div id="mistake-summary" style="font-size:11px; color:var(--katip-text-muted); text-align:center; padding: 6px; background: var(--katip-bg-sec); border-radius: 8px;">
                             Ortalama her ${Math.round(config.mistakeEveryWords * (100/config.mistakeChance))} kelimede 1 hata yapılacak.
                         </div>
                     </div>
