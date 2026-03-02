@@ -405,6 +405,12 @@
             ? element.value
             : element.textContent;
 
+        // Olayları göndermeden önce imleci metnin sonuna sabitle
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            element.selectionStart = valueBeforeEvents.length;
+            element.selectionEnd   = valueBeforeEvents.length;
+        }
+
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
 
@@ -417,6 +423,9 @@
             } else {
                 element.value = valueBeforeEvents.slice(0, -1);
             }
+            // Değer atandıktan sonra imleci sona sabitle
+            element.selectionStart = element.value.length;
+            element.selectionEnd   = element.value.length;
         } else {
             element.textContent = valueBeforeEvents.slice(0, -1);
         }
@@ -755,6 +764,14 @@
             ? element.value
             : element.textContent;
 
+        // Kullanıcı textarea'ya tıklayıp imleci ortaya taşımış olabilir; site'in
+        // keydown handler'ı imlecin bulunduğu konuma karakter ekler.  Bunu önlemek
+        // için olayları göndermeden önce imleci her zaman metnin sonuna sabitle.
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            element.selectionStart = valueBeforeEvents.length;
+            element.selectionEnd   = valueBeforeEvents.length;
+        }
+
         // Tuş basma eventleri
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
@@ -769,6 +786,9 @@
             } else {
                 element.value = valueBeforeEvents + key;
             }
+            // Değer atandıktan sonra imleci sona sabitle
+            element.selectionStart = element.value.length;
+            element.selectionEnd   = element.value.length;
         } else {
             // Eğer element bir div veya span ise (contenteditable)
             element.textContent = valueBeforeEvents + key;
