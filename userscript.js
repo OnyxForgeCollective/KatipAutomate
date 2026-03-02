@@ -40,6 +40,9 @@
         mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 30,
         mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70,
 
+        // --- Kullanıcı Hata Yakalama Modu ---
+        userErrorDetector: localStorage.getItem('katip-user-error-detector') || 'off', // 'off', 'prevent', 'delete'
+
         // --- UI Settings ---
         panelTop: localStorage.getItem('katip-panel-top') || '50px',
         panelLeft: localStorage.getItem('katip-panel-left') || '0px'
@@ -179,12 +182,18 @@
     };
 
     function generateTypo(char) {
-        const lowerChar = char.toLowerCase();
-        const typos = typoMap[lowerChar];
-        if (!typos || typos.length === 0) return char;
+        // Kullanıcı isteği: Rastgele tuşa basmalı, mesela "armuJ".
+        // O yüzden sadece harf (A-Z) döndüren bir randomizer ekliyoruz.
+        const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         
-        const typo = typos[Math.floor(Math.random() * typos.length)];
-        return char === char.toUpperCase() ? typo.toUpperCase() : typo;
+        // Asla aynı harfi seçme
+        let randomChar = char;
+        let attempts = 0;
+        while (randomChar.toLowerCase() === char.toLowerCase() && attempts < 10) {
+             randomChar = letters.charAt(Math.floor(Math.random() * letters.length));
+             attempts++;
+        }
+        return randomChar;
     }
 
     function getMistakeType() {
@@ -366,7 +375,16 @@
         }
 
         const rawType = getMistakeType();
-        const pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+        let pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+
+        // Kullanıcı isteği: "Boşluk bırakma her zaman doğru olmalı."
+        // Yanlış yapılacak index'in ' ' (space) OLMADIĞINDAN kesinlikle emin olmalıyız.
+        let attempts = 0;
+        while (word[pos] === ' ' && attempts < 10) {
+            pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+            attempts++;
+        }
+
         // transposition needs pos+1 to be in-bounds; fall back to typo if not
         const mistakeType = (rawType === 'transposition' && pos + 1 >= word.length) ? 'typo' : rawType;
 
@@ -679,6 +697,45 @@
         updateMistakeChart();
     }
 
+    // --- KULLANICI HATA DEDEKTÖRÜ ---
+    let userErrorListenerAdded = false;
+
+    function attachUserErrorDetector(inputElement) {
+        if (!inputElement || userErrorListenerAdded) return;
+
+        // Klavyeden girilen karakteri dinleyen listener
+        // capture modunda (true) dinliyoruz ki sitenin listener'larından önce biz yakalayalım
+        inputElement.addEventListener('keydown', (e) => {
+            if (!config.active || config.userErrorDetector === 'off') return;
+
+            // Eğer event programatik olarak (script tarafından) gönderilmişse izin ver
+            if (!e.isTrusted) return;
+
+            // Kontrol tuşlarına (Backspace, Enter, Shift vs) izin verebiliriz veya tamamen engelleyebiliriz.
+            // Sadece karakter girmesini (length === 1) engellemek genelde daha güvenlidir.
+            if (e.key.length === 1 || e.code === 'Space') {
+                logger(`Kullanıcı müdahalesi algılandı: ${e.key} - Mod: ${config.userErrorDetector}`);
+
+                if (config.userErrorDetector === 'prevent') {
+                    // Anında engelle (Karakter hiçbir şekilde siteye ulaşmaz)
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    logger('Kullanıcı girişi preventDefault ile anında engellendi.');
+                } else if (config.userErrorDetector === 'delete') {
+                    // Siteye ulaşmasına izin ver, ancak anında backspace simüle ederek sil
+                    // (Zero delay silme)
+                    setTimeout(() => {
+                         simulateBackspace(inputElement);
+                         logger('Kullanıcı girişi anında silindi (Backspace simülasyonu).');
+                    }, 0);
+                }
+            }
+        }, true);
+
+        userErrorListenerAdded = true;
+    }
+
     // --- ELEMENT BULUCU (HTML Analizi) ---
     function findActiveElements() {
         // 1. DÜELLO ve SINAV MODU
@@ -751,8 +808,7 @@
     // --- DÖNGÜ (DÜELLO & TEXTAREA) ---
     async function loopTextarea(elements) {
         const { source, input } = elements;
-        input.removeAttribute('readonly');
-        input.removeAttribute('disabled');
+        // Textarea'nın kilitli özelliklerine dokunmuyoruz.
         input.focus();
 
         // ── Resume: derive position state from already-typed content ──────────────
@@ -962,8 +1018,7 @@
     // --- DÖNGÜ (ÇALIŞMA MODU) ---
     async function loopLesson(elements) {
         const { source, input } = elements;
-        input.removeAttribute('readonly');
-        input.removeAttribute('disabled');
+        // Textarea'nın kilitli özelliklerine dokunmuyoruz.
         input.focus();
 
         // On the very first section, skip spans that were already typed (resume support)
@@ -1101,8 +1156,7 @@
     // --- DÖNGÜ (HIZ TESTİ) ---
     async function loopSpeedTest(elements) {
         const { source, input } = elements;
-        input.removeAttribute('readonly');
-        input.removeAttribute('disabled');
+        // Textarea'nın kilitli özelliklerine dokunmuyoruz.
         input.focus();
 
         logger('Hız Testi Döngüsü başlıyor...');
@@ -1223,6 +1277,8 @@
         startStatsTracking();
         updatePanelUI(true);
 
+        attachUserErrorDetector(elements.input);
+
         if (elements.type === 'textarea') {
             await loopTextarea(elements);
         } else if (elements.type === 'speedtest') {
@@ -1265,7 +1321,7 @@
 
         const colors = {
             bg: 'var(--katip-bg, #ffffff)',
-            bgSecondary: 'var(--katip-bg-sec, #f4f4f4)',
+            bgSecondary: 'var(--katip-bg-sec, #f4f6f8)',
             text: 'var(--katip-text, #111111)',
             textMuted: 'var(--katip-text-muted, #666666)',
             border: 'var(--katip-border, #e0e0e0)',
@@ -1279,11 +1335,12 @@
         const cssVars = `
             :root {
                 --katip-bg: ${isDarkMode ? '#1a1a1a' : '#ffffff'};
-                --katip-bg-sec: ${isDarkMode ? '#252525' : '#f8f9fa'};
+                --katip-bg-sec: ${isDarkMode ? '#252525' : '#f4f6f8'};
                 --katip-text: ${isDarkMode ? '#ffffff' : '#212529'};
                 --katip-text-muted: ${isDarkMode ? '#a0a0a0' : '#6c757d'};
-                --katip-border: ${isDarkMode ? '#333333' : '#dee2e6'};
+                --katip-border: ${isDarkMode ? '#333333' : '#e1e5eb'};
                 --katip-input-bg: ${isDarkMode ? '#2d2d2d' : '#ffffff'};
+                --katip-shadow: ${isDarkMode ? '0 10px 30px rgba(0,0,0,0.5)' : '0 10px 30px rgba(0,0,0,0.08)'};
             }
             @media (prefers-color-scheme: dark) {
                 :root {
@@ -1293,6 +1350,7 @@
                     --katip-text-muted: #a0a0a0;
                     --katip-border: #333333;
                     --katip-input-bg: #2d2d2d;
+                    --katip-shadow: 0 10px 30px rgba(0,0,0,0.5);
                 }
             }
         `;
@@ -1313,9 +1371,9 @@
                     background: var(--katip-bg);
                     color: var(--katip-text);
                     width: 320px;
-                    border: none;
+                    border: 1px solid var(--katip-border);
                     border-radius: 12px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05);
+                    box-shadow: var(--katip-shadow);
                     display: ${config.panelMinimized ? 'none' : 'flex'};
                     flex-direction: column;
                     top: ${config.panelTop};
@@ -1448,10 +1506,36 @@
                     border: 1px solid var(--katip-border);
                     color: var(--katip-text);
                     padding: 4px 8px;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     width: 60px;
                     text-align: right;
                     font-size: 12px;
+                    transition: border-color 0.2s;
+                }
+                .katip-input:focus {
+                    outline: none;
+                    border-color: ${colors.primary};
+                }
+
+                .katip-radio-group {
+                    display: flex;
+                    gap: 8px;
+                    margin-top: 6px;
+                }
+                .katip-radio-label {
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    color: var(--katip-text-muted);
+                }
+                .katip-radio-label input {
+                    margin: 0;
+                    cursor: pointer;
+                }
+                .katip-radio-label:hover {
+                    color: var(--katip-text);
                 }
 
                 .katip-toggle {
@@ -1610,6 +1694,24 @@
                             <span class="katip-slider"></span>
                         </label>
                     </div>
+
+                    <div class="katip-setting-row" style="flex-direction: column; align-items: flex-start;">
+                        <div>
+                            <div class="katip-setting-label">🛡️ Hata Dedektörü (Kullanıcı)</div>
+                            <div class="katip-setting-desc">Siz yanlış tuşa bastığınızda ne yapılsın?</div>
+                        </div>
+                        <div class="katip-radio-group">
+                            <label class="katip-radio-label">
+                                <input type="radio" name="user-error" value="off" ${config.userErrorDetector === 'off' ? 'checked' : ''}> Kapalı
+                            </label>
+                            <label class="katip-radio-label">
+                                <input type="radio" name="user-error" value="prevent" ${config.userErrorDetector === 'prevent' ? 'checked' : ''}> Engelle
+                            </label>
+                            <label class="katip-radio-label">
+                                <input type="radio" name="user-error" value="delete" ${config.userErrorDetector === 'delete' ? 'checked' : ''}> Anında Sil
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="katip-section">
@@ -1751,6 +1853,17 @@
             config.humanLikeTyping = this.checked;
             localStorage.setItem('katip-human-like', this.checked);
         };
+
+        // User Error Detector Radio Buttons
+        const userErrorRadios = document.querySelectorAll('input[name="user-error"]');
+        userErrorRadios.forEach(radio => {
+            radio.addEventListener('change', function() {
+                if (this.checked) {
+                    config.userErrorDetector = this.value;
+                    localStorage.setItem('katip-user-error-detector', this.value);
+                }
+            });
+        });
 
         // Mistake System
         const mistakeToggle = document.getElementById('mistake-toggle');
