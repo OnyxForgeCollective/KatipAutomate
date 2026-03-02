@@ -204,8 +204,11 @@
     function shouldMakeMistake(wordCount) {
         if (!config.mistakeModeEnabled) return false;
 
+        // Prevent mistake on the very first word
+        if (wordCount === 0) return false;
+
         // "Her X kelimede bir" kontrolü
-        if ((wordCount + 1) % config.mistakeEveryWords === 0) {
+        if (wordCount % config.mistakeEveryWords === 0) {
             // "%Y ihtimalle" kontrolü
             return Math.random() * 100 < config.mistakeChance;
         }
@@ -226,19 +229,16 @@
         if (shouldCorrect) {
             // Notice the mistake, then backspace and retype
             await sleep(200 + Math.random() * 300);
-            const deleteCount = Math.min(config.mistakeDeleteCount, pos + 1);
+            const deleteCount = 1; // we just made one wrong character at word[pos]
             for (let i = 0; i < deleteCount; i++) {
                 if (!config.active) return shouldCorrect;
                 simulateBackspace(element);
                 await sleep(getHumanLikeDelay());
             }
-            // Retype the characters we deleted
-            const startPos = Math.max(0, pos - deleteCount + 1);
-            for (let i = startPos; i <= pos; i++) {
-                if (!config.active) return shouldCorrect;
-                simulateKey(element, word[i]);
-                await sleep(getHumanLikeDelay());
-            }
+            // Retype the characters we deleted (which is just word[pos])
+            if (!config.active) return shouldCorrect;
+            simulateKey(element, word[pos]);
+            await sleep(getHumanLikeDelay());
         }
         for (let i = pos + 1; i < word.length; i++) {
             if (!config.active) return shouldCorrect;
@@ -402,20 +402,8 @@
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
 
-        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
-            const nativeSetter = Object.getOwnPropertyDescriptor(
-                Object.getPrototypeOf(element), "value"
-            );
-            if (nativeSetter && nativeSetter.set) {
-                nativeSetter.set.call(element, element.value.slice(0, -1));
-            } else {
-                element.value = element.value.slice(0, -1);
-            }
-        } else {
-            element.textContent = element.textContent.slice(0, -1);
-        }
-
-        element.dispatchEvent(new InputEvent('input', { data: null, bubbles: true }));
+        // NOTE: Same as simulateKey, let the site's JS handle the backspace event to avoid duplicate actions.
+        element.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', eventObj));
     }
 
@@ -678,8 +666,9 @@
         updateForecastBox(wordsWritten10min, forecast10Est, forecast10Box, 10);
 
         // Update last word display
-        if (lastWordDisplay) {
-            lastWordDisplay.innerText = stats.lastWord || '—';
+        const lastWordText = document.getElementById('last-word-text');
+        if (lastWordText) {
+            lastWordText.innerText = stats.lastWord || '—';
         }
         if (lastWordStatus) {
             lastWordStatus.innerText = stats.lastWord ? (stats.lastWordCorrect ? '✓' : '✗') : '';
@@ -747,23 +736,12 @@
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
 
-        // Elementin türüne göre değer atama
-        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
-            const nativeSetter = Object.getOwnPropertyDescriptor(
-                Object.getPrototypeOf(element), "value"
-            );
-            if (nativeSetter && nativeSetter.set) {
-                nativeSetter.set.call(element, element.value + key);
-            } else {
-                element.value += key;
-            }
-        } else {
-            // Eğer element bir div veya span ise (contenteditable)
-            element.textContent += key;
-        }
+        // NOTE: Direct assignment to element.value/textContent has been removed.
+        // The site's own JavaScript handles the keyboard/input events and updates the field.
+        // Direct assignment causes double characters (lag effect) as the site also inserts the character.
 
         // Input ve tuş bırakma eventleri
-        element.dispatchEvent(new InputEvent('input', { data: key, bubbles: true }));
+        element.dispatchEvent(new InputEvent('input', { data: key, inputType: 'insertText', bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', eventObj));
 
         // İstatistikleri güncelle
@@ -803,37 +781,71 @@
                 continue;
             }
 
-            // ── Otomatik Hata Düzeltme Kontrolü ─────────────────────────────────────
-            if (config.autoCorrectEnabled) {
-                const currentVal = input.value;
-                let errorFoundIndex = -1;
+            // ── Smart Cursor / Position Recovery ─────────────────────────────────────
+            let pos = input.value.length;
+            const currentVal = input.value;
+            let syncLost = false;
 
-                // Metni baştan sona (veya mevcut input uzunluğuna kadar) kontrol et
-                for (let i = 0; i < currentVal.length; i++) {
-                    let expectedChar = sourceText[i];
-                    if (expectedChar && expectedChar.charCodeAt(0) === 160) expectedChar = ' ';
+            // Hızlıca senkronizasyonu kontrol et (Karakter karakter)
+            let errorIndex = -1;
+            for (let i = 0; i < currentVal.length; i++) {
+                let expectedChar = sourceText[i];
+                if (expectedChar && expectedChar.charCodeAt(0) === 160) expectedChar = ' ';
 
-                    if (currentVal[i] !== expectedChar) {
-                        errorFoundIndex = i;
-                        break;
-                    }
-                }
-
-                if (errorFoundIndex !== -1) {
-                    logger(`Hata tespit edildi, pozisyon: ${errorFoundIndex}. Siliniyor...`);
-                    // Hataya kadar olan kısmı sil
-                    const backspaceCount = currentVal.length - errorFoundIndex;
-                    for (let j = 0; j < backspaceCount; j++) {
-                        simulateBackspace(input);
-                        await sleep(getHumanLikeDelay() * 0.5); // Silme işlemini biraz daha hızlı yap
-                        if (!config.active) break;
-                    }
-                    continue; // Döngünün başına dönüp tekrar pozisyon kontrolü yap
+                if (currentVal[i] !== expectedChar) {
+                    errorIndex = i;
+                    syncLost = true;
+                    break;
                 }
             }
 
-            // ── Single source-of-truth cursor: always re-read length ──────────────
-            const pos = input.value.length;
+            // Eğer senkronizasyon kaybolduysa ve Auto-Correct açıksa:
+            if (syncLost && config.autoCorrectEnabled) {
+                logger(`Senkronizasyon kayboldu (Hata pozisyonu: ${errorIndex}). Son kelime ile yer aranıyor...`);
+
+                // Son yazılan temiz kelimeleri (tamamlanmış) bulmaya çalış
+                const wordsTyped = currentVal.slice(0, errorIndex).trim().split(/\s+/).filter(Boolean);
+                let recoverySuccess = false;
+
+                if (wordsTyped.length > 0) {
+                    // Son doğru yazılan 2-3 kelimeyi alarak sourceText içinde tam olarak nerede olduğumuzu bulalım.
+                    const searchPhrase = wordsTyped.slice(-Math.min(3, wordsTyped.length)).join(' ');
+                    const searchIndex = sourceText.indexOf(searchPhrase);
+
+                    if (searchIndex !== -1) {
+                        // Eğer bulduysak, tam olarak o kelimenin bitişini hesaplayalım.
+                        const newCorrectPos = searchIndex + searchPhrase.length;
+
+                        // Fazlalık (yanlış/saçma) kısmı silelim
+                        const backspaceCount = currentVal.length - newCorrectPos;
+                        if (backspaceCount > 0) {
+                            logger(`Zekice pozisyon bulundu! ${backspaceCount} karakter silinerek düzeltiliyor...`);
+                            for (let j = 0; j < backspaceCount; j++) {
+                                simulateBackspace(input);
+                                await sleep(getHumanLikeDelay() * 0.5);
+                                if (!config.active) break;
+                            }
+                            recoverySuccess = true;
+                        }
+                    }
+                }
+
+                // Eğer kelime araması başarısız olduysa klasik (karakter karakter) silmeye geç (Fallback)
+                if (!recoverySuccess) {
+                    logger(`Kelime tabanlı recovery başarısız. Klasik Auto-Correct uygulanıyor...`);
+                    const backspaceCount = currentVal.length - errorIndex;
+                    for (let j = 0; j < backspaceCount; j++) {
+                        simulateBackspace(input);
+                        await sleep(getHumanLikeDelay() * 0.5);
+                        if (!config.active) break;
+                    }
+                }
+
+                continue; // Döngünün başına dön ve yeni temiz pozisyondan devam et
+            }
+
+            // Yeniden oku, ihtimale karşı
+            pos = input.value.length;
 
             // Guard: position must not exceed source length
             if (pos > sourceText.length) {
@@ -895,6 +907,15 @@
                     stats.mistakeWordCount = wordCount;
                     stats.lastWord = word;
                     stats.lastWordCorrect = false;
+
+                    // Immediately update UI to prevent empty display issue
+                    const lastWordText = document.getElementById('last-word-text');
+                    const lastWordStatus = document.getElementById('last-word-status');
+                    if (lastWordText) lastWordText.innerText = stats.lastWord || '—';
+                    if (lastWordStatus) {
+                        lastWordStatus.innerText = '✗';
+                        lastWordStatus.style.color = '#ff3b30';
+                    }
                     continue; // next iteration reads fresh pos from input.value.length
                 }
             }
@@ -922,6 +943,15 @@
                 stats.mistakeWordCount = wordCount;
                 stats.lastWord = completedWord;
                 stats.lastWordCorrect = true;
+
+                // Immediately update UI to prevent empty display issue
+                const lastWordText = document.getElementById('last-word-text');
+                const lastWordStatus = document.getElementById('last-word-status');
+                if (lastWordText) lastWordText.innerText = stats.lastWord || '—';
+                if (lastWordStatus) {
+                    lastWordStatus.innerText = stats.lastWordCorrect ? '✓' : '✗';
+                    lastWordStatus.style.color = stats.lastWordCorrect ? '#34c759' : '#ff3b30';
+                }
             }
 
             await sleep(getHumanLikeDelay());
@@ -1212,18 +1242,18 @@
     // --- ARAYÜZ ---
     function updatePanelUI(isRunning) {
         const btn = document.getElementById('btn-main');
-        const status = document.getElementById('bot-status');
-        if (btn && status) {
+        const statusBadge = document.getElementById('bot-status-badge');
+        if (btn && statusBadge) {
             if (isRunning) {
-                btn.innerText = "⏹ Durdur";
-                btn.style.background = "linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%)";
-                status.innerText = "Aktif";
-                status.style.color = "#34c759";
+                btn.innerText = "⏹️ Durdur";
+                btn.classList.add('active');
+                statusBadge.innerText = "Aktif";
+                statusBadge.style.background = "#078440";
             } else {
-                btn.innerText = "▶ Başlat";
-                btn.style.background = "linear-gradient(135deg, #007aff 0%, #0051d5 100%)";
-                status.innerText = "Bekliyor";
-                status.style.color = "#ff9500";
+                btn.innerText = "▶️ Başlat";
+                btn.classList.remove('active');
+                statusBadge.innerText = "Bekliyor";
+                statusBadge.style.background = "#0051c3"; // colors.primary
             }
         }
     }
@@ -1249,20 +1279,20 @@
         const cssVars = `
             :root {
                 --katip-bg: ${isDarkMode ? '#1a1a1a' : '#ffffff'};
-                --katip-bg-sec: ${isDarkMode ? '#2d2d2d' : '#f4f4f4'};
-                --katip-text: ${isDarkMode ? '#ffffff' : '#111111'};
-                --katip-text-muted: ${isDarkMode ? '#a0a0a0' : '#666666'};
-                --katip-border: ${isDarkMode ? '#404040' : '#e0e0e0'};
-                --katip-input-bg: ${isDarkMode ? '#333333' : '#ffffff'};
+                --katip-bg-sec: ${isDarkMode ? '#252525' : '#f8f9fa'};
+                --katip-text: ${isDarkMode ? '#ffffff' : '#212529'};
+                --katip-text-muted: ${isDarkMode ? '#a0a0a0' : '#6c757d'};
+                --katip-border: ${isDarkMode ? '#333333' : '#dee2e6'};
+                --katip-input-bg: ${isDarkMode ? '#2d2d2d' : '#ffffff'};
             }
             @media (prefers-color-scheme: dark) {
                 :root {
                     --katip-bg: #1a1a1a;
-                    --katip-bg-sec: #2d2d2d;
+                    --katip-bg-sec: #252525;
                     --katip-text: #ffffff;
                     --katip-text-muted: #a0a0a0;
-                    --katip-border: #404040;
-                    --katip-input-bg: #333333;
+                    --katip-border: #333333;
+                    --katip-input-bg: #2d2d2d;
                 }
             }
         `;
@@ -1283,9 +1313,9 @@
                     background: var(--katip-bg);
                     color: var(--katip-text);
                     width: 320px;
-                    border: 1px solid var(--katip-border);
-                    border-radius: 6px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    border: none;
+                    border-radius: 12px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05);
                     display: ${config.panelMinimized ? 'none' : 'flex'};
                     flex-direction: column;
                     top: ${config.panelTop};
@@ -1296,7 +1326,7 @@
 
                 .katip-header {
                     background: var(--katip-bg-sec);
-                    padding: 10px 14px;
+                    padding: 12px 16px;
                     border-bottom: 1px solid var(--katip-border);
                     display: flex;
                     justify-content: space-between;
@@ -1355,47 +1385,59 @@
 
                 .katip-main-btn {
                     width: 100%;
-                    padding: 10px;
+                    padding: 12px;
                     background: ${colors.primary};
                     color: white;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 8px;
                     font-weight: 600;
-                    font-size: 14px;
+                    font-size: 15px;
                     cursor: pointer;
-                    transition: background 0.2s;
+                    transition: all 0.2s ease;
+                    box-shadow: 0 4px 6px rgba(0, 81, 195, 0.2);
                 }
-                .katip-main-btn:hover { background: ${colors.primaryHover}; }
-                .katip-main-btn.active { background: ${colors.danger}; }
-                .katip-main-btn.active:hover { background: ${colors.dangerHover}; }
+                .katip-main-btn:hover {
+                    background: ${colors.primaryHover};
+                    transform: translateY(-1px);
+                    box-shadow: 0 6px 8px rgba(0, 81, 195, 0.3);
+                }
+                .katip-main-btn.active {
+                    background: ${colors.danger};
+                    box-shadow: 0 4px 6px rgba(217, 45, 32, 0.2);
+                }
+                .katip-main-btn.active:hover {
+                    background: ${colors.dangerHover};
+                    box-shadow: 0 6px 8px rgba(217, 45, 32, 0.3);
+                }
 
                 .katip-stats-grid {
                     display: grid;
                     grid-template-columns: 1fr 1fr;
-                    gap: 8px;
+                    gap: 10px;
                 }
 
                 .katip-stat-box {
                     background: var(--katip-bg-sec);
-                    border: 1px solid var(--katip-border);
-                    border-radius: 4px;
-                    padding: 8px;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px;
                     text-align: center;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
                 }
-                .katip-stat-label { font-size: 10px; color: var(--katip-text-muted); text-transform: uppercase; margin-bottom: 4px; font-weight: 600; }
-                .katip-stat-value { font-size: 16px; font-weight: bold; }
+                .katip-stat-label { font-size: 10px; color: var(--katip-text-muted); text-transform: uppercase; margin-bottom: 4px; font-weight: 600; letter-spacing: 0.5px;}
+                .katip-stat-value { font-size: 18px; font-weight: 700; }
 
                 .katip-section {
                     border-top: 1px solid var(--katip-border);
-                    padding-top: 14px;
+                    padding-top: 16px;
                 }
-                .katip-section-title { font-size: 12px; font-weight: 600; margin-bottom: 10px; color: var(--katip-text-muted); text-transform: uppercase; }
+                .katip-section-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--katip-text); display: flex; align-items: center; gap: 6px; }
 
                 .katip-setting-row {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 10px;
+                    margin-bottom: 12px;
                 }
 
                 .katip-setting-label { font-size: 13px; font-weight: 500; }
@@ -1488,7 +1530,7 @@
 
             <div class="katip-header" id="katip-header">
                 <div class="katip-title">
-                    <span>KatipAutomate</span>
+                    <span>🤖 KatipAutomate</span>
                     <span class="katip-badge" id="bot-status-badge">Bekliyor</span>
                 </div>
                 <div class="katip-controls">
@@ -1497,29 +1539,32 @@
             </div>
 
             <div class="katip-body">
-                <button id="btn-main" class="katip-main-btn">▶ Başlat</button>
+                <button id="btn-main" class="katip-main-btn">▶️ Başlat</button>
 
                 <div class="katip-stats-grid">
                     <div class="katip-stat-box">
-                        <div class="katip-stat-label">Gerçekleşen WPM</div>
+                        <div class="katip-stat-label">🚀 Gerçekleşen WPM</div>
                         <div class="katip-stat-value" id="wpm-calculated" style="color:${colors.primary}">0</div>
                     </div>
                     <div class="katip-stat-box">
-                        <div class="katip-stat-label">Hedeflenen WPM</div>
+                        <div class="katip-stat-label">🎯 Hedeflenen WPM</div>
                         <div class="katip-stat-value" id="wpm-estimated" style="color:${colors.success}">0</div>
                     </div>
                     <div class="katip-stat-box">
-                        <div class="katip-stat-label">Yazılan</div>
+                        <div class="katip-stat-label">📝 Yazılan</div>
                         <div class="katip-stat-value" id="words-written">0</div>
                     </div>
                     <div class="katip-stat-box">
-                        <div class="katip-stat-label">Son Kelime</div>
-                        <div class="katip-stat-value" id="last-word-display" style="font-size:12px; overflow:hidden; text-overflow:ellipsis;">—</div>
+                        <div class="katip-stat-label">👁️ Son Kelime</div>
+                        <div class="katip-stat-value" id="last-word-display" style="font-size:13px; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; justify-content:center; gap:4px;">
+                            <span id="last-word-text">—</span>
+                            <span id="last-word-status" style="font-weight:bold;"></span>
+                        </div>
                     </div>
                 </div>
 
                 <div class="katip-section">
-                    <div class="katip-section-title">Genel Ayarlar</div>
+                    <div class="katip-section-title">⚙️ Genel Ayarlar</div>
 
                     <div class="katip-setting-row">
                         <div>
@@ -1569,7 +1614,7 @@
 
                 <div class="katip-section">
                     <div class="katip-section-title" style="display:flex; justify-content:space-between; align-items:center;">
-                        Kasıtlı Hata Sistemi
+                        🎭 Kasıtlı Hata Sistemi
                         <label class="katip-toggle" style="transform: scale(0.8); transform-origin: right;">
                             <input type="checkbox" id="mistake-toggle" ${config.mistakeModeEnabled ? 'checked' : ''}>
                             <span class="katip-slider"></span>
@@ -1577,7 +1622,7 @@
                     </div>
 
                     <div id="mistake-config-area" style="display: ${config.mistakeModeEnabled ? 'block' : 'none'};">
-                        <div style="font-size: 12px; background: var(--katip-bg-sec); padding: 10px; border-radius: 4px; border: 1px solid var(--katip-border); margin-bottom: 10px; line-height: 1.5;">
+                        <div style="font-size: 12px; background: var(--katip-bg-sec); padding: 12px; border-radius: 8px; border: none; margin-bottom: 10px; line-height: 1.6; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);">
                             Her
                             <input type="number" id="m-words" class="katip-input" style="width:40px; padding:2px; display:inline;" value="${config.mistakeEveryWords}" min="1">
                             kelimeden birisi,<br> %
