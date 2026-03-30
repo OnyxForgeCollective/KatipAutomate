@@ -40,6 +40,9 @@
         mistakeChance: parseInt(localStorage.getItem('katip-mistake-chance')) || 30,
         mistakeClearChance: parseInt(localStorage.getItem('katip-mistake-clear-chance')) || 70,
 
+        // --- Kullanıcı Hata Yakalama Modu ---
+        userErrorDetector: localStorage.getItem('katip-user-error-detector') || 'off', // 'off', 'prevent', 'delete'
+
         // --- UI Settings ---
         panelTop: localStorage.getItem('katip-panel-top') || '50px',
         panelLeft: localStorage.getItem('katip-panel-left') || '0px'
@@ -124,7 +127,7 @@
         const calibratedBaseDelay = Math.max(1, config.delay + dynamicDelayOffset);
 
         if (!config.humanLikeTyping) return calibratedBaseDelay;
-        
+
         // Add random variation to delay (±20%)
         const variation = calibratedBaseDelay * 0.2;
         const randomDelay = calibratedBaseDelay + (Math.random() * variation * 2 - variation);
@@ -179,12 +182,18 @@
     };
 
     function generateTypo(char) {
-        const lowerChar = char.toLowerCase();
-        const typos = typoMap[lowerChar];
-        if (!typos || typos.length === 0) return char;
-        
-        const typo = typos[Math.floor(Math.random() * typos.length)];
-        return char === char.toUpperCase() ? typo.toUpperCase() : typo;
+        // Kullanıcı isteği: Rastgele tuşa basmalı, mesela "armuJ".
+        // O yüzden sadece harf (A-Z) döndüren bir randomizer ekliyoruz.
+        const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+        // Asla aynı harfi seçme
+        let randomChar = char;
+        let attempts = 0;
+        while (randomChar.toLowerCase() === char.toLowerCase() && attempts < 10) {
+             randomChar = letters.charAt(Math.floor(Math.random() * letters.length));
+             attempts++;
+        }
+        return randomChar;
     }
 
     function getMistakeType() {
@@ -366,7 +375,16 @@
         }
 
         const rawType = getMistakeType();
-        const pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+        let pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+
+        // Kullanıcı isteği: "Boşluk bırakma her zaman doğru olmalı."
+        // Yanlış yapılacak index'in ' ' (space) OLMADIĞINDAN kesinlikle emin olmalıyız.
+        let attempts = 0;
+        while (word[pos] === ' ' && attempts < 10) {
+            pos = Math.floor(Math.random() * (word.length - 2)) + 1;
+            attempts++;
+        }
+
         // transposition needs pos+1 to be in-bounds; fall back to typo if not
         const mistakeType = (rawType === 'transposition' && pos + 1 >= word.length) ? 'typo' : rawType;
 
@@ -465,12 +483,12 @@
 
     function updateStats(char) {
         stats.totalChars++;
-        
+
         // Count words properly: increment when transitioning from space to non-space
         const isSpace = (char === ' ' || char === '\n' || char === '\t');
         if (!isSpace && lastCharWasSpace) {
             stats.totalWords++;
-            
+
             // Check if word limit is reached
             if (config.wordLimitEnabled && stats.totalWords >= config.wordLimit) {
                 logger(`Kelime limiti ulaşıldı: ${stats.totalWords}/${config.wordLimit}`);
@@ -556,7 +574,7 @@
         const forecast3Box = document.getElementById('forecast-3min-box');
         const forecast5Box = document.getElementById('forecast-5min-box');
         const forecast10Box = document.getElementById('forecast-10min-box');
-        
+
         // Taskbar compact stats elements
         const taskbarWpmCalculated = document.getElementById('taskbar-wpm-calculated');
         const taskbarWpmEstimated = document.getElementById('taskbar-wpm-estimated');
@@ -570,7 +588,7 @@
         // Color coding based on WPM
         const calcWPM = stats.currentWPM || 0;
         const estWPM = stats.estimatedWPM || 0;
-        
+
         // Function to get color and animation based on WPM
         function getWPMStyle(wpm) {
             if (wpm > 150) {
@@ -593,26 +611,26 @@
             wpmCalculated.style.color = calcStyle.color;
             wpmCalculated.style.animation = calcStyle.animation;
         }
-        
+
         if (wpmEstimated) {
             wpmEstimated.innerText = estWPM;
             wpmEstimated.style.color = estStyle.color;
             wpmEstimated.style.animation = estStyle.animation;
         }
-        
+
         // Update taskbar compact stats
         if (taskbarWpmCalculated) {
             taskbarWpmCalculated.innerText = calcWPM;
             taskbarWpmCalculated.style.color = calcStyle.color;
             taskbarWpmCalculated.style.animation = calcStyle.animation;
         }
-        
+
         if (taskbarWpmEstimated) {
             taskbarWpmEstimated.innerText = estWPM;
             taskbarWpmEstimated.style.color = estStyle.color;
             taskbarWpmEstimated.style.animation = estStyle.animation;
         }
-        
+
         // Update taskbar word limit display
         if (taskbarWordLimit) {
             if (config.wordLimitEnabled) {
@@ -623,12 +641,12 @@
                 taskbarWordLimit.style.display = 'none';
             }
         }
-        
+
         // Update word counter display
         if (wordsWritten) {
             wordsWritten.innerText = stats.totalWords;
         }
-        
+
         if (wordSeparator && wordsRemaining && wordsLimit) {
             if (config.wordLimitEnabled) {
                 const remaining = Math.max(0, config.wordLimit - stats.totalWords);
@@ -642,7 +660,7 @@
 
         // Update forecast boxes
         const elapsedMinutes = stats.startTime ? (Date.now() - stats.startTime) / 60000 : 0;
-        
+
         // Helper function to update forecast box with threshold check
         function updateForecastBox(displayElement, estElement, boxElement, minutes) {
             if (displayElement) {
@@ -651,7 +669,7 @@
             if (estElement) {
                 const forecast = Math.round(stats.estimatedWPM * minutes);
                 estElement.innerText = forecast;
-                
+
                 // Flash if above threshold
                 if (boxElement && stats.totalWords > forecast * FORECAST_THRESHOLD) {
                     boxElement.style.animation = 'flash-orange 1s infinite';
@@ -660,7 +678,7 @@
                 }
             }
         }
-        
+
         updateForecastBox(wordsWritten3min, forecast3Est, forecast3Box, 3);
         updateForecastBox(wordsWritten5min, forecast5Est, forecast5Box, 5);
         updateForecastBox(wordsWritten10min, forecast10Est, forecast10Box, 10);
@@ -677,6 +695,45 @@
 
         // Refresh mistake chart while stats panel is open
         updateMistakeChart();
+    }
+
+    // --- KULLANICI HATA DEDEKTÖRÜ ---
+    let userErrorListenerAdded = false;
+
+    function attachUserErrorDetector(inputElement) {
+        if (!inputElement || userErrorListenerAdded) return;
+
+        // Klavyeden girilen karakteri dinleyen listener
+        // capture modunda (true) dinliyoruz ki sitenin listener'larından önce biz yakalayalım
+        inputElement.addEventListener('keydown', (e) => {
+            if (!config.active || config.userErrorDetector === 'off') return;
+
+            // Eğer event programatik olarak (script tarafından) gönderilmişse izin ver
+            if (!e.isTrusted) return;
+
+            // Kontrol tuşlarına (Backspace, Enter, Shift vs) izin verebiliriz veya tamamen engelleyebiliriz.
+            // Sadece karakter girmesini (length === 1) engellemek genelde daha güvenlidir.
+            if (e.key.length === 1 || e.code === 'Space') {
+                logger(`Kullanıcı müdahalesi algılandı: ${e.key} - Mod: ${config.userErrorDetector}`);
+
+                if (config.userErrorDetector === 'prevent') {
+                    // Anında engelle (Karakter hiçbir şekilde siteye ulaşmaz)
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    logger('Kullanıcı girişi preventDefault ile anında engellendi.');
+                } else if (config.userErrorDetector === 'delete') {
+                    // Siteye ulaşmasına izin ver, ancak anında backspace simüle ederek sil
+                    // (Zero delay silme)
+                    setTimeout(() => {
+                         simulateBackspace(inputElement);
+                         logger('Kullanıcı girişi anında silindi (Backspace simülasyonu).');
+                    }, 0);
+                }
+            }
+        }, true);
+
+        userErrorListenerAdded = true;
     }
 
     // --- ELEMENT BULUCU (HTML Analizi) ---
@@ -751,8 +808,7 @@
     // --- DÖNGÜ (DÜELLO & TEXTAREA) ---
     async function loopTextarea(elements) {
         const { source, input } = elements;
-        input.removeAttribute('readonly');
-        input.removeAttribute('disabled');
+        // Textarea'nın kilitli özelliklerine dokunmuyoruz.
         input.focus();
 
         // ── Resume: derive position state from already-typed content ──────────────
@@ -962,8 +1018,7 @@
     // --- DÖNGÜ (ÇALIŞMA MODU) ---
     async function loopLesson(elements) {
         const { source, input } = elements;
-        input.removeAttribute('readonly');
-        input.removeAttribute('disabled');
+        // Textarea'nın kilitli özelliklerine dokunmuyoruz.
         input.focus();
 
         // On the very first section, skip spans that were already typed (resume support)
@@ -1002,21 +1057,92 @@
             logger(`Ders modu: ${spans.length} karakter bulundu.`);
 
             let contentChanged = false;
+            let i = startIndex;
 
-            for (let i = startIndex; i < spans.length; i++) {
-                if (!config.active) break;
-
-                // Detect if the source content changed mid-typing (span removed from DOM)
+            // Sitenin kendi kullandığı `<span class="text-danger">` (hatalı harf) üzerinden
+            // dinamik bir state machine kuruyoruz. Statik for döngüsü yerine dinamik kontrol.
+            while (i < spans.length && config.active) {
+                // DOM'dan span silindiyse (sayfa yenilendi vs) döngüden çık
                 if (!source.contains(spans[i])) {
                     contentChanged = true;
                     logger('Ders içeriği değişti, yeniden okunuyor...');
                     break;
                 }
 
+                // Ekranda (geçmişte veya bulunduğumuz yerde) 'text-danger' olan hatalı span var mı?
+                // Kullanıcı araya girip yanlış bir tuşa bastıysa (biz prevent edemezsek) veya bizim bot hata yaptıysa
+                // geri dönüp düzeltmesi gerekecek (Auto-Correct açıksa).
+                if (config.autoCorrectEnabled) {
+                     // Mevcut durumdaki tüm spanları tekrar çekip hatalı (kırmızı) olan ilk elemanı buluyoruz.
+                     const currentSpans = Array.from(source.querySelectorAll('span'));
+                     const firstErrorIndex = currentSpans.findIndex(s => s.className.includes('text-danger'));
+
+                     // Eğer hatalı bir karakter bulunduysa ve bu karakter henüz geçmediğimiz bir ileride değilse
+                     if (firstErrorIndex !== -1 && firstErrorIndex <= i) {
+                         logger(`Otomatik Düzeltme: Hatalı giriş tespit edildi (Index: ${firstErrorIndex}). Geri sarılıyor...`);
+                         // Geri doğru silmemiz gereken karakter sayısı (mevcut index'ten hata indexine kadar olan fark + 1 kendisi)
+                         const backspacesNeeded = (i - firstErrorIndex);
+
+                         for(let j = 0; j <= backspacesNeeded; j++){
+                             if (!config.active) break;
+                             simulateBackspace(input);
+                             await sleep(getHumanLikeDelay() * 0.4);
+                         }
+
+                         // Indexi geri sar ki doğrusunu baştan yazsın
+                         i = firstErrorIndex;
+                         continue; // Döngü başına dön ve tekrar kontrol et
+                     }
+                }
+
                 let charToType = spans[i].textContent;
                 if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
 
-                simulateKey(input, charToType);
+                // Kasıtlı Hata (Mistake) Sistemi Entegrasyonu
+                // Ders modunda kelimeler tam net belli olmadığı için harf/span bazlı "N. karakterde bir ihtimal" mantığı kuracağız.
+                // Veya boşluk geldiğinde kelime bitmiş sayıp bir sonraki kelimede rastgele bir karakterde hata yaptıracağız.
+                let madeMistakeThisIteration = false;
+
+                if (config.mistakeModeEnabled && charToType !== " ") {
+                     // Yaklaşık olarak 'mistakeEveryWords * 6' karaktere denk gelecek şekilde bir şans hesabı (1 kelime ortalama 6 harf)
+                     // Daha güvenli bir "chance" mantığı:
+                     const charactersPassed = i + 1;
+                     const avgWordLength = 6;
+
+                     // Eğer bulunduğumuz index "her N kelimenin" harf karşılığına ulaştıysa hata deniyoruz
+                     if (charactersPassed % (config.mistakeEveryWords * avgWordLength) === 0) {
+                         if (Math.random() * 100 < config.mistakeChance) {
+                             // Kasıtlı Hata Yap!
+                             const typoChar = generateTypo(charToType);
+                             logger(`Ders Modu: Kasıtlı Hata Yapıldı (${charToType} yerine ${typoChar})`);
+                             simulateKey(input, typoChar);
+                             madeMistakeThisIteration = true;
+                             stats.totalMistakes++;
+
+                             const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+                             if (shouldCorrect) {
+                                 // Kendisi fark edip düzeltsin
+                                 stats.correctedMistakes++;
+                                 await sleep(getHumanLikeDelay() + 200);
+                                 if (!config.active) break;
+                                 simulateBackspace(input);
+                                 await sleep(getHumanLikeDelay());
+                                 if (!config.active) break;
+                                 simulateKey(input, charToType); // Doğrusunu yaz
+                             } else {
+                                 // Sitenin `text-danger` ataması yapmasına izin ver ve
+                                 // eger autoCorrectEnabled açıksa, bir sonraki iteration'da zaten silecek!
+                                 // O yüzden autoCorrectEnabled açıksa bile "yanlış bıraktıysak"
+                                 // aslında hata düzeltme rutini onu görecek. Ama burada ekstra bir şey yapmaya gerek yok.
+                             }
+                         }
+                     }
+                }
+
+                if (!madeMistakeThisIteration) {
+                    simulateKey(input, charToType);
+                }
+
                 if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
 
                 const delay = getHumanLikeDelay();
@@ -1025,54 +1151,74 @@
                 if (shouldAddRandomPause()) {
                     await sleep(getRandomPauseDelay());
                 }
+
+                // Eğer hata yapıldı ve düzeltilmediyse (ve AutoCorrect de kapalıysa), i yine de ilerlemeli.
+                // Eğer hata yapıldı ve düzeltilmediyse, ama AutoCorrect açıksa, sonraki döngü başı `text-danger` bulup geri saracak.
+                i++;
             }
 
             if (!config.active) break;
 
-            if (!contentChanged) {
-                // All spans typed — check for auto-next or wait for the next section to load
-                logger('Bölüm tamamlandı, yeni içerik bekleniyor...');
+            if (!contentChanged && i >= spans.length) {
+                // All spans typed
+                logger('Bölüm veya sayfa tamamlandı, duruma bakılıyor...');
+
+                // Check if all spans are actually success (sitenin tamamlandığını doğrulaması)
+                // Sitenin DOM state'i arkaplanda gecikmeli güncellenebiliyor.
+                await sleep(500);
 
                 if (config.autoNextLesson) {
-                    const nextLessonBtn = document.querySelector('a[onclick*="dersdegistir"]');
-                    const lessonEndedMsg = Array.from(document.querySelectorAll('div')).find(el => el.textContent.includes('Ders Sona Erdi!'));
+                    // Modal içindeki Sonraki Ders (i=ileri) butonunu bul
+                    const nextLessonBtn = document.querySelector('a[onclick="dersdegistir(\'i\')"]');
 
-                    if (lessonEndedMsg && nextLessonBtn) {
-                        logger('Ders Sona Erdi mesajı bulundu, sonraki derse geçiliyor...');
+                    if (nextLessonBtn) {
+                        logger('Tüm spanlar bitti, Sonraki Ders butonuna basılıyor...');
                         nextLessonBtn.click();
 
-                        // Wait for the new content to appear
+                        // Wait for the new content to appear safely (up to 15 seconds)
                         let waited = 0;
                         let foundNew = false;
-                        while(waited < 10000) {
-                             await sleep(200);
-                             waited += 200;
+                        while(waited < 15000) {
+                             if (!config.active) break;
+                             await sleep(250);
+                             waited += 250;
 
-                             // Try to find the new lesson text spans
+                             // Site içi ajax ile spanlar yenilenebilir
                              const newLessonSource = document.querySelector('#fklavyemetni, #qklavyemetni');
-                             if(newLessonSource && newLessonSource.querySelectorAll('span').length > 0) {
-                                  // Content loaded
-                                  foundNew = true;
-                                  break;
+                             if (newLessonSource) {
+                                  const newSpans = newLessonSource.querySelectorAll('span');
+                                  // Yeni spanlar geldiyse ve eskilerden farklıysa ya da span classları resetlenmişse
+                                  // (yani ilk baştaki harfler yeşil değilse, yeni ders başlamıştır)
+                                  if (newSpans.length > 0 && Array.from(newSpans).slice(0, 5).some(s => !s.className.includes('text-success'))) {
+                                      foundNew = true;
+                                      break;
+                                  }
                              }
                         }
 
-                        if(foundNew) {
+                        if(foundNew && config.active) {
                              logger('Yeni ders içeriği başarıyla yüklendi, yazmaya devam ediliyor.');
-                             // Reset variables to start typing from the beginning of the new lesson
                              firstIteration = true;
                              input.value = "";
                              stats.totalWords = 0;
                              stats.mistakeWordCount = 0;
+                             // Delay dynamic offset'i sıfırlıyoruz ki hız sapmasın
+                             dynamicDelayOffset = 0;
                              continue;
-                        } else {
-                             logger('Yeni ders içeriği yüklenemedi. Bot durduruluyor.', 'error');
+                        } else if (config.active) {
+                             logger('Yeni ders içeriği zamanında yüklenemedi. Bot durduruluyor.', 'error');
                              stopBot();
                              break;
                         }
+                    } else {
+                        // Belki animasyon sürüyordur, buton DOM'a henüz inmemiştir
+                        logger('Sonraki ders butonu henüz bulunamadı, bekleniyor...', 'warn');
+                        await sleep(1000);
+                        continue; // Tekrar kontrol etsin
                     }
                 }
 
+                // Auto-next is off or it's just a section within a lesson
                 const firstSpanText = spans[0].textContent;
                 const spanCount = spans.length;
 
@@ -1083,8 +1229,9 @@
                     waited += 150;
                     const newSpans = source.querySelectorAll('span');
                     if (newSpans.length !== spanCount ||
-                        (newSpans.length > 0 && newSpans[0].textContent !== firstSpanText)) {
-                        logger('Yeni ders içeriği algılandı!');
+                        (newSpans.length > 0 && newSpans[0].textContent !== firstSpanText) ||
+                        (newSpans.length > 0 && !newSpans[0].className.includes('text-success'))) {
+                        logger('Yeni içerik algılandı!');
                         break;
                     }
                 }
@@ -1101,8 +1248,7 @@
     // --- DÖNGÜ (HIZ TESTİ) ---
     async function loopSpeedTest(elements) {
         const { source, input } = elements;
-        input.removeAttribute('readonly');
-        input.removeAttribute('disabled');
+        // Textarea'nın kilitli özelliklerine dokunmuyoruz.
         input.focus();
 
         logger('Hız Testi Döngüsü başlıyor...');
@@ -1223,6 +1369,8 @@
         startStatsTracking();
         updatePanelUI(true);
 
+        attachUserErrorDetector(elements.input);
+
         if (elements.type === 'textarea') {
             await loopTextarea(elements);
         } else if (elements.type === 'speedtest') {
@@ -1265,7 +1413,7 @@
 
         const colors = {
             bg: 'var(--katip-bg, #ffffff)',
-            bgSecondary: 'var(--katip-bg-sec, #f4f4f4)',
+            bgSecondary: 'var(--katip-bg-sec, #f4f6f8)',
             text: 'var(--katip-text, #111111)',
             textMuted: 'var(--katip-text-muted, #666666)',
             border: 'var(--katip-border, #e0e0e0)',
@@ -1279,11 +1427,12 @@
         const cssVars = `
             :root {
                 --katip-bg: ${isDarkMode ? '#1a1a1a' : '#ffffff'};
-                --katip-bg-sec: ${isDarkMode ? '#252525' : '#f8f9fa'};
+                --katip-bg-sec: ${isDarkMode ? '#252525' : '#f4f6f8'};
                 --katip-text: ${isDarkMode ? '#ffffff' : '#212529'};
                 --katip-text-muted: ${isDarkMode ? '#a0a0a0' : '#6c757d'};
-                --katip-border: ${isDarkMode ? '#333333' : '#dee2e6'};
+                --katip-border: ${isDarkMode ? '#333333' : '#e1e5eb'};
                 --katip-input-bg: ${isDarkMode ? '#2d2d2d' : '#ffffff'};
+                --katip-shadow: ${isDarkMode ? '0 10px 30px rgba(0,0,0,0.5)' : '0 10px 30px rgba(0,0,0,0.08)'};
             }
             @media (prefers-color-scheme: dark) {
                 :root {
@@ -1293,6 +1442,7 @@
                     --katip-text-muted: #a0a0a0;
                     --katip-border: #333333;
                     --katip-input-bg: #2d2d2d;
+                    --katip-shadow: 0 10px 30px rgba(0,0,0,0.5);
                 }
             }
         `;
@@ -1313,9 +1463,9 @@
                     background: var(--katip-bg);
                     color: var(--katip-text);
                     width: 320px;
-                    border: none;
+                    border: 1px solid var(--katip-border);
                     border-radius: 12px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05);
+                    box-shadow: var(--katip-shadow);
                     display: ${config.panelMinimized ? 'none' : 'flex'};
                     flex-direction: column;
                     top: ${config.panelTop};
@@ -1356,7 +1506,7 @@
                     display: flex;
                     gap: 8px;
                 }
-                
+
                 .katip-btn-icon {
                     background: none;
                     border: none;
@@ -1448,10 +1598,36 @@
                     border: 1px solid var(--katip-border);
                     color: var(--katip-text);
                     padding: 4px 8px;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     width: 60px;
                     text-align: right;
                     font-size: 12px;
+                    transition: border-color 0.2s;
+                }
+                .katip-input:focus {
+                    outline: none;
+                    border-color: ${colors.primary};
+                }
+
+                .katip-radio-group {
+                    display: flex;
+                    gap: 8px;
+                    margin-top: 6px;
+                }
+                .katip-radio-label {
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    color: var(--katip-text-muted);
+                }
+                .katip-radio-label input {
+                    margin: 0;
+                    cursor: pointer;
+                }
+                .katip-radio-label:hover {
+                    color: var(--katip-text);
                 }
 
                 .katip-toggle {
@@ -1610,6 +1786,24 @@
                             <span class="katip-slider"></span>
                         </label>
                     </div>
+
+                    <div class="katip-setting-row" style="flex-direction: column; align-items: flex-start;">
+                        <div>
+                            <div class="katip-setting-label">🛡️ Hata Dedektörü (Kullanıcı)</div>
+                            <div class="katip-setting-desc">Siz yanlış tuşa bastığınızda ne yapılsın?</div>
+                        </div>
+                        <div class="katip-radio-group">
+                            <label class="katip-radio-label">
+                                <input type="radio" name="user-error" value="off" ${config.userErrorDetector === 'off' ? 'checked' : ''}> Kapalı
+                            </label>
+                            <label class="katip-radio-label">
+                                <input type="radio" name="user-error" value="prevent" ${config.userErrorDetector === 'prevent' ? 'checked' : ''}> Engelle
+                            </label>
+                            <label class="katip-radio-label">
+                                <input type="radio" name="user-error" value="delete" ${config.userErrorDetector === 'delete' ? 'checked' : ''}> Anında Sil
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="katip-section">
@@ -1660,7 +1854,7 @@
             startY = e.clientY;
             initialLeft = panel.offsetLeft;
             initialTop = panel.offsetTop;
-            
+
             // disable text selection during drag
             document.body.style.userSelect = 'none';
         });
@@ -1716,15 +1910,16 @@
         // Speed/Delay sync
         const speedInput = document.getElementById('speed-input');
         const botSlider = document.getElementById('bot-slider');
-        
+
         botSlider.oninput = function() {
             config.delay = parseInt(this.value);
             speedInput.value = this.value;
             localStorage.setItem('katip-speed', this.value);
             stats.estimatedWPM = calculateEstimatedWPM();
+            dynamicDelayOffset = 0; // Hız aniden oynatıldığında kalibrasyonu sıfırla ki deli gibi yazmasın
             updateStatsDisplay();
         };
-        
+
         speedInput.oninput = function() {
             let val = parseInt(this.value);
             if (val < 1) val = 1;
@@ -1733,6 +1928,7 @@
             botSlider.value = val;
             localStorage.setItem('katip-speed', val);
             stats.estimatedWPM = calculateEstimatedWPM();
+            dynamicDelayOffset = 0; // Hız aniden oynatıldığında kalibrasyonu sıfırla ki deli gibi yazmasın
             updateStatsDisplay();
         };
 
@@ -1751,6 +1947,17 @@
             config.humanLikeTyping = this.checked;
             localStorage.setItem('katip-human-like', this.checked);
         };
+
+        // User Error Detector Radio Buttons
+        const userErrorRadios = document.querySelectorAll('input[name="user-error"]');
+        userErrorRadios.forEach(radio => {
+            radio.addEventListener('change', function() {
+                if (this.checked) {
+                    config.userErrorDetector = this.value;
+                    localStorage.setItem('katip-user-error-detector', this.value);
+                }
+            });
+        });
 
         // Mistake System
         const mistakeToggle = document.getElementById('mistake-toggle');
