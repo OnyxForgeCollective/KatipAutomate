@@ -34,6 +34,7 @@
         humanLikeTyping: localStorage.getItem('katip-human-like') === 'true',
         autoCorrectEnabled: localStorage.getItem('katip-auto-correct') === 'true',
         autoNextLesson: localStorage.getItem('katip-auto-next') === 'true',
+        autoNextDelay: parseInt(localStorage.getItem('katip-auto-next-delay')) || 5000,
         // --- Hata Sistemi ---
         mistakeModeEnabled: localStorage.getItem('katip-mistake-mode-enabled') === 'true',
         mistakeEveryWords: parseInt(localStorage.getItem('katip-mistake-every-words')) || 5,
@@ -1176,7 +1177,18 @@
                     const nextLessonBtn = document.querySelector('a[onclick="dersdegistir(\'i\')"]');
 
                     if (nextLessonBtn) {
-                        logger('Tüm spanlar bitti, Sonraki Ders butonuna basılıyor...');
+                        logger(`Tüm spanlar bitti. Modalı okumanız için ${config.autoNextDelay / 1000} saniye bekleniyor...`);
+
+                        // Kullanıcının modalı görmesi ve sitenin kendisini toparlaması için bekleme süresi
+                        let preWait = 0;
+                        while (preWait < config.autoNextDelay) {
+                            if (!config.active) break;
+                            await sleep(250);
+                            preWait += 250;
+                        }
+                        if (!config.active) break;
+
+                        logger('Bekleme süresi doldu, Sonraki Ders butonuna basılıyor...');
                         nextLessonBtn.click();
 
                         // Wait for the new content to appear safely (up to 15 seconds)
@@ -1201,29 +1213,16 @@
                         }
 
                         if(foundNew && config.active) {
-                             logger('Yeni ders içeriği başarıyla yüklendi, arta kalan modallar temizleniyor...');
-
-                             // Zorla modal temizleme (Sitenin kendi JS'i kapatmayı unutursa diye)
-                             const openModals = document.querySelectorAll('.modal.show, .modal[style*="display: block"]');
-                             openModals.forEach(m => {
-                                 m.classList.remove('show');
-                                 m.style.display = 'none';
-                                 m.setAttribute('aria-hidden', 'true');
-                             });
-
-                             const backdrops = document.querySelectorAll('.modal-backdrop');
-                             backdrops.forEach(b => b.remove());
-
-                             document.body.classList.remove('modal-open');
-                             document.body.style.paddingRight = '';
-                             document.body.style.overflow = '';
-
-                             logger('Modallar temizlendi, yazmaya devam ediliyor.');
+                             logger('Yeni ders içeriği başarıyla yüklendi, yazmaya devam ediliyor.');
                              firstIteration = true;
                              input.value = "";
+
+                             // Yeni derse geçildiğinde İstatistikleri ve hızı TAMPAMEN sıfırla
+                             // Aksi halde eski dersin süresi hız hesaplamasını bozup scripti çok hızlı yazmaya zorlar.
                              stats.totalWords = 0;
+                             stats.totalChars = 0;
                              stats.mistakeWordCount = 0;
-                             // Delay dynamic offset'i sıfırlıyoruz ki hız sapmasın
+                             stats.startTime = Date.now(); // Timer'ı resetle
                              dynamicDelayOffset = 0;
                              continue;
                         } else if (config.active) {
@@ -1235,15 +1234,6 @@
                         // Belki animasyon sürüyordur, buton DOM'a henüz inmemiştir
                         logger('Sonraki ders butonu henüz bulunamadı, bekleniyor...', 'warn');
                         await sleep(1000);
-                        // Kendi kendini kapatmaya çalışan sitelerde bug oluyor, modal yine de zorla temizlensin
-                        const openModals = document.querySelectorAll('.modal.show, .modal[style*="display: block"]');
-                        if (openModals.length > 0) {
-                            openModals.forEach(m => { m.classList.remove('show'); m.style.display = 'none'; m.setAttribute('aria-hidden', 'true'); });
-                            document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
-                            document.body.classList.remove('modal-open');
-                            document.body.style.paddingRight = '';
-                            document.body.style.overflow = '';
-                        }
                         continue; // Tekrar kontrol etsin
                     }
                 }
@@ -1795,6 +1785,17 @@
                         </label>
                     </div>
 
+                    <div class="katip-setting-row" id="auto-next-delay-row" style="display: ${config.autoNextLesson ? 'flex' : 'none'};">
+                        <div>
+                            <div class="katip-setting-label">Bekleme Süresi</div>
+                            <div class="katip-setting-desc">Ders bittikten sonra (sn)</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <input type="number" id="auto-next-delay-input" class="katip-input" min="0" max="60" value="${config.autoNextDelay / 1000}">
+                            <span style="font-size:11px; color:var(--katip-text-muted)">sn</span>
+                        </div>
+                    </div>
+
                     <div class="katip-setting-row">
                         <div>
                             <div class="katip-setting-label">Otomatik Düzeltme</div>
@@ -1966,7 +1967,20 @@
         document.getElementById('auto-next-toggle').onchange = function() {
             config.autoNextLesson = this.checked;
             localStorage.setItem('katip-auto-next', this.checked);
+            const delayRow = document.getElementById('auto-next-delay-row');
+            if(delayRow) delayRow.style.display = this.checked ? 'flex' : 'none';
         };
+
+        const autoNextDelayInput = document.getElementById('auto-next-delay-input');
+        if (autoNextDelayInput) {
+            autoNextDelayInput.oninput = function() {
+                let val = parseInt(this.value);
+                if (val < 0) val = 0;
+                if (val > 60) val = 60;
+                config.autoNextDelay = val * 1000;
+                localStorage.setItem('katip-auto-next-delay', config.autoNextDelay);
+            };
+        }
 
         document.getElementById('auto-correct-toggle').onchange = function() {
             config.autoCorrectEnabled = this.checked;
