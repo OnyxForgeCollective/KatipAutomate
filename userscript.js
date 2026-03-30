@@ -484,9 +484,14 @@
     function updateStats(char) {
         stats.totalChars++;
 
-        // Count words properly: increment when transitioning from space to non-space
+        // Standard WPM calculation logic: A word is typically 5 characters including spaces.
+        // We calculate it dynamically instead of just string space boundaries.
+        // But for visual limit counting, we also keep track of actual completed words
+        // by detecting transitions from non-space to space.
         const isSpace = (char === ' ' || char === '\n' || char === '\t');
-        if (!isSpace && lastCharWasSpace) {
+
+        // When transitioning from non-space to space, we've completed a word.
+        if (isSpace && !lastCharWasSpace) {
             stats.totalWords++;
 
             // Check if word limit is reached
@@ -500,7 +505,10 @@
         if (stats.startTime) {
             const elapsedMinutes = (Date.now() - stats.startTime) / 60000;
             if (elapsedMinutes > 0) {
-                stats.currentWPM = Math.round(stats.totalWords / elapsedMinutes);
+                // Using standard WPM formula: (total characters / 5) / elapsed_minutes
+                // This provides much smoother, accurate standard WPM that doesn't jump wildly
+                // compared to just dividing exact word count.
+                stats.currentWPM = Math.round((stats.totalChars / 5) / elapsedMinutes);
             }
         }
     }
@@ -533,18 +541,14 @@
         if (!config.delay || config.delay < 1) {
             return 0;
         }
-        // Ortalama kelime uzunluğu (İngilizce için ~5, Türkçe için ~6)
-        const avgWordLength = 6;
-        // Kelime arası boşluk
-        const spaceChar = 1;
-        // Ortalama kelime karakter sayısı (harf + boşluk)
-        const avgCharsPerWord = avgWordLength + spaceChar;
+        // For standardized WPM calculations worldwide, 1 word = 5 characters (including spaces)
+        const charsPerWord = 5;
         // Dakikadaki milisaniye
         const msPerMinute = 60000;
-        // config.delay ms'de bir karakter yazılıyor
+        // config.delay ms'de bir karakter yazılıyor (average delay logic + human random delay causes overhead)
         const charsPerMinute = msPerMinute / config.delay;
-        // Dakikadaki kelime sayısı
-        const wordsPerMinute = Math.round(charsPerMinute / avgCharsPerWord);
+        // Dakikadaki kelime sayısı (Formula: (chars/min) / 5)
+        const wordsPerMinute = Math.round(charsPerMinute / charsPerWord);
         return wordsPerMinute;
     }
 
@@ -1197,7 +1201,24 @@
                         }
 
                         if(foundNew && config.active) {
-                             logger('Yeni ders içeriği başarıyla yüklendi, yazmaya devam ediliyor.');
+                             logger('Yeni ders içeriği başarıyla yüklendi, arta kalan modallar temizleniyor...');
+
+                             // Zorla modal temizleme (Sitenin kendi JS'i kapatmayı unutursa diye)
+                             const openModals = document.querySelectorAll('.modal.show, .modal[style*="display: block"]');
+                             openModals.forEach(m => {
+                                 m.classList.remove('show');
+                                 m.style.display = 'none';
+                                 m.setAttribute('aria-hidden', 'true');
+                             });
+
+                             const backdrops = document.querySelectorAll('.modal-backdrop');
+                             backdrops.forEach(b => b.remove());
+
+                             document.body.classList.remove('modal-open');
+                             document.body.style.paddingRight = '';
+                             document.body.style.overflow = '';
+
+                             logger('Modallar temizlendi, yazmaya devam ediliyor.');
                              firstIteration = true;
                              input.value = "";
                              stats.totalWords = 0;
@@ -1214,12 +1235,21 @@
                         // Belki animasyon sürüyordur, buton DOM'a henüz inmemiştir
                         logger('Sonraki ders butonu henüz bulunamadı, bekleniyor...', 'warn');
                         await sleep(1000);
+                        // Kendi kendini kapatmaya çalışan sitelerde bug oluyor, modal yine de zorla temizlensin
+                        const openModals = document.querySelectorAll('.modal.show, .modal[style*="display: block"]');
+                        if (openModals.length > 0) {
+                            openModals.forEach(m => { m.classList.remove('show'); m.style.display = 'none'; m.setAttribute('aria-hidden', 'true'); });
+                            document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+                            document.body.classList.remove('modal-open');
+                            document.body.style.paddingRight = '';
+                            document.body.style.overflow = '';
+                        }
                         continue; // Tekrar kontrol etsin
                     }
                 }
 
                 // Auto-next is off or it's just a section within a lesson
-                const firstSpanText = spans[0].textContent;
+                const firstSpanText = spans.length > 0 ? spans[0].textContent : "";
                 const spanCount = spans.length;
 
                 let waited = 0;
