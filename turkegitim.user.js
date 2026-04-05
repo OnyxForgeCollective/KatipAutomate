@@ -412,12 +412,31 @@
         return null;
     }
 
+    function getLessonProgressSignature(source, keyboardDiv) {
+        const spans = source ? Array.from(source.querySelectorAll('span')) : [];
+        let activeIndex = -1;
+        let correctCount = 0;
+        let errorCount = 0;
+
+        for (let i = 0; i < spans.length; i++) {
+            const span = spans[i];
+            const cls = span.className || '';
+            if (activeIndex === -1 && cls.includes('sVurguluHarf1')) activeIndex = i;
+            if (cls.includes('sHataliHarf') || span.style.color === 'red') errorCount++;
+            if (cls.includes('sDogruHarf') || cls.includes('text-success')) correctCount++;
+        }
+
+        const hasEnterBg = !!(keyboardDiv && keyboardDiv.style.backgroundImage && keyboardDiv.style.backgroundImage.includes('VurguluKlavyeEnteri'));
+        return `${activeIndex}|${correctCount}|${errorCount}|${hasEnterBg ? 'E' : 'N'}`;
+    }
+
     // --- DÖNGÜ (TURKEGITIM) ---
     async function loopLesson(elements) {
         const { source, input } = elements;
         input.focus();
 
         let mistakeCharCount = 0;
+        let noProgressStreak = 0;
 
         while (config.active) {
             // Check for completion modal first
@@ -508,6 +527,9 @@
                 simulateKey(input, charToType);
             }
 
+            const beforeWaitKeyboard = document.getElementById('dvKlavye');
+            const beforeSignature = getLessonProgressSignature(source, beforeWaitKeyboard);
+
             // Wait for the UI to register the keystroke and advance the cursor
             let waited = 0;
             const maxWait = 2000;
@@ -519,21 +541,11 @@
             }
 
             while (config.active && waited < maxWait) {
-                // If we typed Enter, wait for the keyboard background to clear the Enter state
-                // OR for a new active span to appear that wasn't there before.
-                if (requiresEnter) {
-                    const currentKeyboard = document.getElementById('dvKlavye');
-                    const hasEnterBg = currentKeyboard && currentKeyboard.style.backgroundImage && currentKeyboard.style.backgroundImage.includes('VurguluKlavyeEnteri');
-
-                    if (!hasEnterBg) {
-                        break;
-                    }
-                } else {
-                    // Normal character typing: wait for the active span to change to the next letter
-                    const currentActive = source.querySelector('.sVurguluHarf1');
-                    if (currentActive !== activeSpan) {
-                        break;
-                    }
+                const currentKeyboard = document.getElementById('dvKlavye');
+                const currentSignature = getLessonProgressSignature(source, currentKeyboard);
+                if (currentSignature !== beforeSignature) {
+                    noProgressStreak = 0;
+                    break;
                 }
                 await sleep(20);
                 waited += 20;
@@ -541,7 +553,10 @@
 
             // If the site never acknowledged the keystroke, refocus and retry once
             if (waited >= maxWait) {
-                logger('Tuş yanıt vermedi, odak yenileniyor ve tekrar deneniyor...', 'warn');
+                noProgressStreak++;
+                if (noProgressStreak % 3 === 0) {
+                    logger('Tuş yanıt vermedi, odak yenileniyor ve tekrar deneniyor...', 'warn');
+                }
                 input.focus();
                 await sleep(50);
                 if (requiresEnter) {
@@ -549,7 +564,15 @@
                 } else {
                     simulateKey(input, charToType);
                 }
-                await sleep(150);
+                await sleep(120);
+
+                const afterRetryKeyboard = document.getElementById('dvKlavye');
+                const afterRetrySignature = getLessonProgressSignature(source, afterRetryKeyboard);
+                if (afterRetrySignature === beforeSignature) {
+                    await sleep(80);
+                } else {
+                    noProgressStreak = 0;
+                }
             }
 
             // Optional scrolling
