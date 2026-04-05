@@ -864,10 +864,14 @@
     async function simulateKeyWithRetry(element, char, acknowledgeFn = null, maxWait = 320) {
         if (!element) return false;
 
+        const beforeValue = element.value || '';
         const beforeLength = (element.value || '').length;
         const ack = typeof acknowledgeFn === 'function'
             ? acknowledgeFn
-            : () => ((element.value || '').length !== beforeLength);
+            : () => {
+                const currentValue = element.value || '';
+                return currentValue.length !== beforeLength || currentValue !== beforeValue;
+            };
 
         simulateKey(element, char);
 

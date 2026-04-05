@@ -325,9 +325,9 @@
                 const buttons = el.querySelectorAll('button, [type="button"], [role="button"], a.btn, .btn');
                 for (const btn of buttons) {
                     if (btn.closest('#turkegitim-panel')) continue;
-                    const text = btn.textContent.trim().toLowerCase();
+                    const text = (btn.textContent || '').trim().toLowerCase();
                     if (dismissTextsLower.some(t => text.includes(t))) {
-                        logger(`Popup kapatılıyor: "${btn.textContent.trim()}" butonuna basılıyor`);
+                        logger(`Popup kapatılıyor: "${(btn.textContent || '').trim()}" butonuna basılıyor`);
                         btn.click();
                         anyClosed = true;
                         await sleep(300);
@@ -818,9 +818,11 @@
 
         if (config.active) {
             // Auto-resume after page navigation: close any intro/popup modals first, then start
-            setTimeout(async () => {
-                await closeOpenModals();
-                await startBot();
+            setTimeout(() => {
+                (async () => {
+                    await closeOpenModals();
+                    await startBot();
+                })().catch(err => logger(`Auto-resume hatası: ${err?.message || err}`, 'error'));
             }, 1000);
         }
     }
