@@ -376,40 +376,40 @@
                 continue;
             }
 
-            // Find the active span (indicated by the site with sVurguluHarf1)
-            const activeSpan = source.querySelector('.sVurguluHarf1');
+            let charToType = null;
+            let activeSpan = null;
 
-            if (!activeSpan) {
-                // If there's no active span, the text might be completely done but modal isn't up yet, or it's loading.
-                await sleep(100);
-                continue;
-            }
-
-            if (config.autoCorrectEnabled) {
-                 const currentSpans = Array.from(source.querySelectorAll('span'));
-                 // Check if there are any error spans (assuming class sHataliHarf, adjust if the site uses a different class for red)
-                 const firstErrorSpan = currentSpans.find(s => s.className.includes('sHataliHarf') || s.style.color === 'red');
-
-                 if (firstErrorSpan) {
-                     // Since we follow the active span, if an error exists, the site likely advanced the active span,
-                     // or it stayed. We just backspace until the error is cleared (or the active span moves back).
-                     // Simple backspace approach:
-                     simulateBackspace(input);
-                     await sleep(getHumanLikeDelay() * 0.4);
-                     continue;
-                 }
-            }
-
-            let charToType = activeSpan.textContent;
-            if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
-
-            // Check if the system is actually waiting for an "Enter" keystroke
-            // The site changes the keyboard background to VurguluKlavyeEnteri.gif when it expects an Enter.
+            // 1. First, check if the virtual keyboard is explicitly demanding an Enter key.
+            // This can happen at the end of a line or the end of the lesson even if there are no active spans left.
             const keyboardDiv = document.getElementById('dvKlavye');
-            if (keyboardDiv && keyboardDiv.style.backgroundImage && keyboardDiv.style.backgroundImage.includes('VurguluKlavyeEnteri')) {
+            const requiresEnter = keyboardDiv && keyboardDiv.style.backgroundImage && keyboardDiv.style.backgroundImage.includes('VurguluKlavyeEnteri');
+
+            if (requiresEnter) {
                 charToType = "Enter";
-            } else if (charToType === "\n") {
-                charToType = "Enter";
+            } else {
+                // 2. If no Enter is required, look for the normal active text span.
+                activeSpan = source.querySelector('.sVurguluHarf1');
+
+                if (!activeSpan) {
+                    // No active span and no Enter required. Still loading or transitioning.
+                    await sleep(100);
+                    continue;
+                }
+
+                if (config.autoCorrectEnabled) {
+                     const currentSpans = Array.from(source.querySelectorAll('span'));
+                     const firstErrorSpan = currentSpans.find(s => s.className.includes('sHataliHarf') || s.style.color === 'red');
+
+                     if (firstErrorSpan) {
+                         simulateBackspace(input);
+                         await sleep(getHumanLikeDelay() * 0.4);
+                         continue;
+                     }
+                }
+
+                charToType = activeSpan.textContent;
+                if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
+                if (charToType === "\n") charToType = "Enter";
             }
 
             let madeMistakeThisIteration = false;
@@ -443,23 +443,31 @@
                 simulateKey(input, charToType);
             }
 
-            // Active span logic: We wait until the active span changes to the next one
-            // This prevents us from typing the same character over and over if the site is slow
+            // Wait for the UI to register the keystroke and advance the cursor
             let waited = 0;
             const maxWait = 2000;
             while (config.active && waited < maxWait) {
-                const currentActive = source.querySelector('.sVurguluHarf1');
-                if (currentActive !== activeSpan) {
-                    break; // The site successfully advanced to the next character
+                // If we typed Enter, we wait for the keyboard background to clear the Enter state
+                if (requiresEnter) {
+                    const currentKeyboard = document.getElementById('dvKlavye');
+                    if (!currentKeyboard || !currentKeyboard.style.backgroundImage || !currentKeyboard.style.backgroundImage.includes('VurguluKlavyeEnteri')) {
+                        break;
+                    }
+                } else {
+                    // Otherwise we wait for the active span to change
+                    const currentActive = source.querySelector('.sVurguluHarf1');
+                    if (currentActive !== activeSpan) {
+                        break;
+                    }
                 }
                 await sleep(20);
                 waited += 20;
             }
 
             // Optional scrolling
-            if (activeSpan.scrollIntoViewIfNeeded) {
+            if (activeSpan && activeSpan.scrollIntoViewIfNeeded) {
                 activeSpan.scrollIntoViewIfNeeded();
-            } else if (activeSpan.scrollIntoView) {
+            } else if (activeSpan && activeSpan.scrollIntoView) {
                 activeSpan.scrollIntoView({ block: 'center', inline: 'center' });
             }
 
