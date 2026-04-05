@@ -143,6 +143,9 @@
 
     function simulateBackspace(element) {
         if (!element) return;
+        if (document.activeElement !== element) {
+            element.focus();
+        }
         const eventObj = { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, cancelable: true };
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
@@ -558,6 +561,7 @@
     // --- KONTROL ---
     async function startBot() {
         if (config.active) return;
+        await closeOpenModals();
         const elements = findActiveElements();
         if (!elements) return;
 
