@@ -141,152 +141,19 @@
         return types[Math.floor(Math.random() * types.length)];
     }
 
-    const MIN_WORD_LEN_FOR_MISTAKE = 3;
-
-    function shouldMakeMistake(wordCount) {
-        if (!config.mistakeModeEnabled) return false;
-        if (wordCount === 0) return false;
-
-        if (wordCount % config.mistakeEveryWords === 0) {
-            return Math.random() * 100 < config.mistakeChance;
-        }
-        return false;
-    }
-
-    async function doTypoMistake(element, word, pos) {
-        for (let i = 0; i < pos; i++) {
-            if (!config.active) return true;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        if (!config.active) return true;
-        const typo = generateTypo(word[pos]);
-        simulateKey(element, typo);
-        await sleep(getHumanLikeDelay());
-        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-        if (shouldCorrect) {
-            await sleep(200 + Math.random() * 300);
-            for (let i = 0; i < 1; i++) {
-                if (!config.active) return shouldCorrect;
-                simulateBackspace(element);
-                await sleep(getHumanLikeDelay());
-            }
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[pos]);
-            await sleep(getHumanLikeDelay());
-        }
-        for (let i = pos + 1; i < word.length; i++) {
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        return shouldCorrect;
-    }
-
-    async function doTranspositionMistake(element, word, pos) {
-        for (let i = 0; i < pos; i++) {
-            if (!config.active) return true;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        if (!config.active) return true;
-        simulateKey(element, word[pos + 1]);
-        await sleep(getHumanLikeDelay());
-        if (!config.active) return true;
-        simulateKey(element, word[pos]);
-        await sleep(getHumanLikeDelay());
-        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-        if (shouldCorrect) {
-            await sleep(150 + Math.random() * 200);
-            if (!config.active) return shouldCorrect;
-            simulateBackspace(element);
-            await sleep(getHumanLikeDelay());
-            if (!config.active) return shouldCorrect;
-            simulateBackspace(element);
-            await sleep(getHumanLikeDelay());
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[pos]);
-            await sleep(getHumanLikeDelay());
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[pos + 1]);
-            await sleep(getHumanLikeDelay());
-        }
-        for (let i = pos + 2; i < word.length; i++) {
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        return shouldCorrect;
-    }
-
-    async function doDoubleMistake(element, word, pos) {
-        for (let i = 0; i <= pos; i++) {
-            if (!config.active) return true;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        if (!config.active) return true;
-        simulateKey(element, word[pos]);
-        await sleep(getHumanLikeDelay());
-        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-        if (shouldCorrect) {
-            await sleep(150 + Math.random() * 200);
-            if (!config.active) return shouldCorrect;
-            simulateBackspace(element);
-            await sleep(getHumanLikeDelay());
-        }
-        for (let i = pos + 1; i < word.length; i++) {
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        return shouldCorrect;
-    }
-
-    async function doSkipMistake(element, word, pos) {
-        for (let i = 0; i < pos; i++) {
-            if (!config.active) return true;
-            simulateKey(element, word[i]);
-            await sleep(getHumanLikeDelay());
-        }
-        const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-        if (pos + 1 < word.length) {
-            if (!config.active) return shouldCorrect;
-            simulateKey(element, word[pos + 1]);
-            await sleep(getHumanLikeDelay());
-            if (shouldCorrect) {
-                await sleep(150 + Math.random() * 200);
-                if (!config.active) return shouldCorrect;
-                simulateBackspace(element);
-                await sleep(getHumanLikeDelay());
-                if (!config.active) return shouldCorrect;
-                simulateKey(element, word[pos]);
-                await sleep(getHumanLikeDelay());
-                if (!config.active) return shouldCorrect;
-                simulateKey(element, word[pos + 1]);
-                await sleep(getHumanLikeDelay());
-                for (let i = pos + 2; i < word.length; i++) {
-                    if (!config.active) return shouldCorrect;
-                    simulateKey(element, word[i]);
-                    await sleep(getHumanLikeDelay());
-                }
-            } else {
-                for (let i = pos + 2; i < word.length; i++) {
-                    if (!config.active) return shouldCorrect;
-                    simulateKey(element, word[i]);
-                    await sleep(getHumanLikeDelay());
-                }
-            }
-        }
-        return shouldCorrect;
-    }
-
     function simulateBackspace(element) {
         if (!element) return;
         const eventObj = { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, cancelable: true };
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
+
+        // Ensure visual state matches the fired events
+        if (element.value && element.value.length > 0) {
+            element.value = element.value.slice(0, -1);
+        }
+
         element.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', eventObj));
     }
 
@@ -438,7 +305,14 @@
 
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
+
+        // Native update for older jQuery/native setups that don't rely solely on events
+        const originalValue = element.value;
+        element.value = originalValue + key;
+
         element.dispatchEvent(new InputEvent('input', { data: key, inputType: 'insertText', bubbles: true }));
+        // Change event helps some frameworks notice the update
+        element.dispatchEvent(new Event('change', { bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', eventObj));
 
         updateStats(key);
@@ -463,122 +337,108 @@
         const { source, input } = elements;
         input.focus();
 
-        let firstIteration = true;
+        let mistakeCharCount = 0;
 
         while (config.active) {
-            const spans = Array.from(source.querySelectorAll('span'));
-
-            if (spans.length === 0) {
-                await sleep(200);
+            // Check for completion modal first
+            const modal = document.getElementById('dvBitisPenceresi');
+            if (modal && modal.style.display !== 'none') {
+                if (config.autoNextLesson) {
+                    const nextBtn = document.getElementById('itbBitisSonraki');
+                    if (nextBtn) {
+                        logger('Ders bitti. Sonraki derse geçiliyor...');
+                        localStorage.setItem('turkegitim-auto-resume', 'true');
+                        nextBtn.click();
+                        await sleep(2000); // Wait for potential page reload or ajax update
+                        dynamicDelayOffset = 0;
+                        continue;
+                    }
+                }
+                logger('Ders tamamlandı, bot bekliyor.');
+                await sleep(1000);
                 continue;
             }
 
-            let startIndex = 0;
-            if (firstIteration && input.value.length > 0) {
-                let accumulated = 0;
-                for (let j = 0; j < spans.length; j++) {
-                    const t = spans[j].textContent;
-                    accumulated += (t === '' || t.charCodeAt(0) === 160) ? 1 : t.length;
-                    if (accumulated >= input.value.length) {
-                        startIndex = j + 1;
-                        break;
-                    }
-                }
+            // Find the active span (indicated by the site with sVurguluHarf1)
+            const activeSpan = source.querySelector('.sVurguluHarf1');
+
+            if (!activeSpan) {
+                // If there's no active span, the text might be completely done but modal isn't up yet, or it's loading.
+                await sleep(100);
+                continue;
             }
-            firstIteration = false;
 
-            let i = startIndex;
+            if (config.autoCorrectEnabled) {
+                 const currentSpans = Array.from(source.querySelectorAll('span'));
+                 // Check if there are any error spans (assuming class sHataliHarf, adjust if the site uses a different class for red)
+                 const firstErrorSpan = currentSpans.find(s => s.className.includes('sHataliHarf') || s.style.color === 'red');
 
-            while (i < spans.length && config.active) {
-                if (!source.contains(spans[i])) {
-                    break;
-                }
+                 if (firstErrorSpan) {
+                     // Since we follow the active span, if an error exists, the site likely advanced the active span,
+                     // or it stayed. We just backspace until the error is cleared (or the active span moves back).
+                     // Simple backspace approach:
+                     simulateBackspace(input);
+                     await sleep(getHumanLikeDelay() * 0.4);
+                     continue;
+                 }
+            }
 
-                if (config.autoCorrectEnabled) {
-                     const currentSpans = Array.from(source.querySelectorAll('span'));
-                     // Site uses sHataliHarf class for errors (guessing based on common conventions, adjust if needed)
-                     const firstErrorIndex = currentSpans.findIndex(s => s.className.includes('sHataliHarf'));
+            let charToType = activeSpan.textContent;
+            if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
 
-                     if (firstErrorIndex !== -1 && firstErrorIndex <= i) {
-                         const backspacesNeeded = (i - firstErrorIndex);
-                         for(let j = 0; j <= backspacesNeeded; j++){
+            let madeMistakeThisIteration = false;
+
+            if (config.mistakeModeEnabled && charToType !== " ") {
+                 mistakeCharCount++;
+                 const avgWordLength = 6;
+
+                 if (mistakeCharCount % (config.mistakeEveryWords * avgWordLength) === 0) {
+                     if (Math.random() * 100 < config.mistakeChance) {
+                         const typoChar = generateTypo(charToType);
+                         simulateKey(input, typoChar);
+                         madeMistakeThisIteration = true;
+                         stats.totalMistakes++;
+
+                         const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
+                         if (shouldCorrect) {
+                             stats.correctedMistakes++;
+                             await sleep(getHumanLikeDelay() + 200);
                              if (!config.active) break;
                              simulateBackspace(input);
-                             await sleep(getHumanLikeDelay() * 0.4);
-                         }
-                         i = firstErrorIndex;
-                         continue;
-                     }
-                }
-
-                let charToType = spans[i].textContent;
-                if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
-
-                let madeMistakeThisIteration = false;
-
-                if (config.mistakeModeEnabled && charToType !== " ") {
-                     const charactersPassed = i + 1;
-                     const avgWordLength = 6;
-
-                     if (charactersPassed % (config.mistakeEveryWords * avgWordLength) === 0) {
-                         if (Math.random() * 100 < config.mistakeChance) {
-                             const typoChar = generateTypo(charToType);
-                             simulateKey(input, typoChar);
-                             madeMistakeThisIteration = true;
-                             stats.totalMistakes++;
-
-                             const shouldCorrect = Math.random() * 100 < config.mistakeClearChance;
-                             if (shouldCorrect) {
-                                 stats.correctedMistakes++;
-                                 await sleep(getHumanLikeDelay() + 200);
-                                 if (!config.active) break;
-                                 simulateBackspace(input);
-                                 await sleep(getHumanLikeDelay());
-                                 if (!config.active) break;
-                                 simulateKey(input, charToType);
-                             }
+                             await sleep(getHumanLikeDelay());
+                             if (!config.active) break;
+                             simulateKey(input, charToType);
                          }
                      }
-                }
-
-                if (!madeMistakeThisIteration) {
-                    simulateKey(input, charToType);
-                }
-
-                if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
-
-                await sleep(getHumanLikeDelay());
-                if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
-
-                i++;
+                 }
             }
 
-            if (!config.active) break;
-
-            if (i >= spans.length) {
-                await sleep(500);
-
-                const modal = document.getElementById('dvBitisPenceresi');
-                if (modal && modal.style.display !== 'none') {
-                    if (config.autoNextLesson) {
-                        const nextBtn = document.getElementById('itbBitisSonraki');
-                        if (nextBtn) {
-                            logger('Sonraki derse geçiliyor...');
-                            // Enable auto-resume in case it triggers a page reload
-                            localStorage.setItem('turkegitim-auto-resume', 'true');
-                            nextBtn.click();
-
-                            // wait for content update
-                            await sleep(2000);
-                            firstIteration = true;
-                            dynamicDelayOffset = 0;
-                            continue;
-                        }
-                    }
-                } else {
-                     await sleep(1000);
-                }
+            if (!madeMistakeThisIteration) {
+                simulateKey(input, charToType);
             }
+
+            // Active span logic: We wait until the active span changes to the next one
+            // This prevents us from typing the same character over and over if the site is slow
+            let waited = 0;
+            const maxWait = 2000;
+            while (config.active && waited < maxWait) {
+                const currentActive = source.querySelector('.sVurguluHarf1');
+                if (currentActive !== activeSpan) {
+                    break; // The site successfully advanced to the next character
+                }
+                await sleep(20);
+                waited += 20;
+            }
+
+            // Optional scrolling
+            if (activeSpan.scrollIntoViewIfNeeded) {
+                activeSpan.scrollIntoViewIfNeeded();
+            } else if (activeSpan.scrollIntoView) {
+                activeSpan.scrollIntoView({ block: 'center', inline: 'center' });
+            }
+
+            await sleep(getHumanLikeDelay());
+            if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
         }
     }
 
