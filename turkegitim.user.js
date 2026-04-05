@@ -290,13 +290,22 @@
     function simulateKey(element, char) {
         if (!element) return;
 
-        const isSpace = (char === " " || char.charCodeAt(0) === 160);
-        const key = isSpace ? ' ' : char;
-        const keyCode = isSpace ? 32 : char.charCodeAt(0);
+        let key, code, keyCode;
+
+        if (char === "Enter") {
+            key = 'Enter';
+            code = 'Enter';
+            keyCode = 13;
+        } else {
+            const isSpace = (char === " " || char.charCodeAt(0) === 160);
+            key = isSpace ? ' ' : char;
+            keyCode = isSpace ? 32 : char.charCodeAt(0);
+            code = isSpace ? 'Space' : 'Key' + (char.toUpperCase());
+        }
 
         const eventObj = {
             key: key,
-            code: isSpace ? 'Space' : 'Key' + (char.toUpperCase()),
+            code: code,
             keyCode: keyCode,
             which: keyCode,
             bubbles: true,
@@ -306,16 +315,24 @@
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
 
-        // Native update for older jQuery/native setups that don't rely solely on events
-        const originalValue = element.value;
-        element.value = originalValue + key;
+        if (char === "Enter") {
+             // For enter, we might just need the event, or appending a newline
+             element.value = element.value + '\n';
+             element.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak', bubbles: true }));
+        } else {
+            // Native update for older jQuery/native setups that don't rely solely on events
+            const originalValue = element.value;
+            element.value = originalValue + key;
+            element.dispatchEvent(new InputEvent('input', { data: key, inputType: 'insertText', bubbles: true }));
+        }
 
-        element.dispatchEvent(new InputEvent('input', { data: key, inputType: 'insertText', bubbles: true }));
         // Change event helps some frameworks notice the update
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', eventObj));
 
-        updateStats(key);
+        if (char !== "Enter") {
+            updateStats(key);
+        }
     }
 
     // --- ELEMENT BULUCU ---
@@ -386,9 +403,18 @@
             let charToType = activeSpan.textContent;
             if (charToType === "" || charToType.charCodeAt(0) === 160) charToType = " ";
 
+            // Check if the system is actually waiting for an "Enter" keystroke
+            // The site changes the keyboard background to VurguluKlavyeEnteri.gif when it expects an Enter.
+            const keyboardDiv = document.getElementById('dvKlavye');
+            if (keyboardDiv && keyboardDiv.style.backgroundImage && keyboardDiv.style.backgroundImage.includes('VurguluKlavyeEnteri')) {
+                charToType = "Enter";
+            } else if (charToType === "\n") {
+                charToType = "Enter";
+            }
+
             let madeMistakeThisIteration = false;
 
-            if (config.mistakeModeEnabled && charToType !== " ") {
+            if (config.mistakeModeEnabled && charToType !== " " && charToType !== "Enter") {
                  mistakeCharCount++;
                  const avgWordLength = 6;
 
