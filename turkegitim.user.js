@@ -316,8 +316,8 @@
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
 
         if (char === "Enter") {
-             // For enter, we might just need the event, or appending a newline
-             element.value = element.value + '\n';
+             // Most typing sites just listen to the keydown/keypress for Enter,
+             // modifying the value directly often causes cursor/length desync.
              element.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak', bubbles: true }));
         } else {
             // Native update for older jQuery/native setups that don't rely solely on events
@@ -446,15 +446,25 @@
             // Wait for the UI to register the keystroke and advance the cursor
             let waited = 0;
             const maxWait = 2000;
+
+            // For Enter, we should also wait for a short fixed delay
+            // as line breaks usually involve animations or DOM re-layouts.
+            if (requiresEnter) {
+                await sleep(150 + getHumanLikeDelay() / 2);
+            }
+
             while (config.active && waited < maxWait) {
-                // If we typed Enter, we wait for the keyboard background to clear the Enter state
+                // If we typed Enter, wait for the keyboard background to clear the Enter state
+                // OR for a new active span to appear that wasn't there before.
                 if (requiresEnter) {
                     const currentKeyboard = document.getElementById('dvKlavye');
-                    if (!currentKeyboard || !currentKeyboard.style.backgroundImage || !currentKeyboard.style.backgroundImage.includes('VurguluKlavyeEnteri')) {
+                    const hasEnterBg = currentKeyboard && currentKeyboard.style.backgroundImage && currentKeyboard.style.backgroundImage.includes('VurguluKlavyeEnteri');
+
+                    if (!hasEnterBg) {
                         break;
                     }
                 } else {
-                    // Otherwise we wait for the active span to change
+                    // Normal character typing: wait for the active span to change to the next letter
                     const currentActive = source.querySelector('.sVurguluHarf1');
                     if (currentActive !== activeSpan) {
                         break;
@@ -462,6 +472,11 @@
                 }
                 await sleep(20);
                 waited += 20;
+            }
+
+            // Extra safety delay if we hit the max wait (e.g. site is lagging)
+            if (waited >= maxWait) {
+                await sleep(100);
             }
 
             // Optional scrolling
