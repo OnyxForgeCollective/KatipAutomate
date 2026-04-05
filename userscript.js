@@ -408,6 +408,10 @@
     function simulateBackspace(element) {
         if (!element) return;
 
+        if (document.activeElement !== element) {
+            element.focus();
+        }
+
         const eventObj = {
             key: 'Backspace',
             code: 'Backspace',
@@ -736,6 +740,49 @@
         userErrorListenerAdded = true;
     }
 
+    // --- POPUP KAPATICI ---
+    async function closeOpenModals() {
+        const popupSelectors = [
+            '[id*="Penceresi"]',
+            '[id*="Modal"]',
+            '[id*="Popup"]',
+            '.modal',
+            '.popup',
+            '.overlay',
+        ];
+
+        const dismissTexts = ['Kapat', 'Tamam', 'Devam', 'Başla', 'Onayla', 'Evet', 'OK', '×', 'x'];
+        let anyClosed = false;
+
+        for (const selector of popupSelectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+                if (!el) continue;
+                if (el.id === 'katip-v12-panel' || el.closest('#katip-v12-panel')) continue;
+
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) continue;
+                if (el.style.display === 'none') continue;
+
+                const buttons = el.querySelectorAll('button, [type="button"], [role="button"], a.btn, .btn');
+                for (const btn of buttons) {
+                    if (btn.closest('#katip-v12-panel')) continue;
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    if (dismissTexts.some(t => text.includes(t.toLowerCase()))) {
+                        logger(`Popup kapatılıyor: "${(btn.textContent || '').trim()}" butonuna basılıyor`);
+                        btn.click();
+                        anyClosed = true;
+                        await sleep(300);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (anyClosed) await sleep(500);
+        return anyClosed;
+    }
+
     // --- ELEMENT BULUCU (HTML Analizi) ---
     function findActiveElements() {
         // 1. DÜELLO ve SINAV MODU
@@ -776,6 +823,10 @@
     function simulateKey(element, char) {
         if (!element) return;
 
+        if (document.activeElement !== element) {
+            element.focus();
+        }
+
         const isSpace = (char === " " || char.charCodeAt(0) === 160);
         const key = isSpace ? ' ' : char;
         const keyCode = isSpace ? 32 : char.charCodeAt(0);
@@ -803,6 +854,31 @@
 
         // İstatistikleri güncelle
         updateStats(key);
+    }
+
+    async function simulateKeyWithRetry(element, char, acknowledgeFn = null, maxWait = 320) {
+        if (!element) return false;
+
+        const beforeLength = (element.value || '').length;
+        const ack = typeof acknowledgeFn === 'function'
+            ? acknowledgeFn
+            : () => ((element.value || '').length !== beforeLength);
+
+        simulateKey(element, char);
+
+        let waited = 0;
+        while (config.active && waited < maxWait) {
+            if (ack()) return true;
+            await sleep(20);
+            waited += 20;
+        }
+
+        logger('Tuş yanıt vermedi, odak yenileniyor ve tekrar deneniyor...', 'warn');
+        element.focus();
+        await sleep(50);
+        simulateKey(element, char);
+        await sleep(120);
+        return ack();
     }
 
     // --- DÖNGÜ (DÜELLO & TEXTAREA) ---
@@ -977,7 +1053,7 @@
             }
 
             // ── Normal character type ─────────────────────────────────────────────
-            simulateKey(input, ch);
+            await simulateKeyWithRetry(input, ch);
 
             // Track word completion: a space typed after a non-space character
             // means the preceding word just finished.
@@ -1140,7 +1216,7 @@
                 }
 
                 if (!madeMistakeThisIteration) {
-                    simulateKey(input, charToType);
+                    await simulateKeyWithRetry(input, charToType);
                 }
 
                 if (i % 5 === 0) spans[i].scrollIntoView({ block: 'center' });
@@ -1174,6 +1250,7 @@
                     if (nextLessonBtn) {
                         logger('Tüm spanlar bitti, Sonraki Ders butonuna basılıyor...');
                         nextLessonBtn.click();
+                        await closeOpenModals();
 
                         // Wait for the new content to appear safely (up to 15 seconds)
                         let waited = 0;
@@ -1315,7 +1392,7 @@
             } else {
                 for (let i = startCharIdx; i < wordToType.length; i++) {
                     if (!config.active) break;
-                    simulateKey(input, wordToType[i]);
+                    await simulateKeyWithRetry(input, wordToType[i]);
                     await sleep(getHumanLikeDelay());
                 }
             }
@@ -1344,7 +1421,7 @@
             }
 
             // Type the space to advance the game to the next word
-            simulateKey(input, ' ');
+            await simulateKeyWithRetry(input, ' ');
             await sleep(getHumanLikeDelay() + 30);
             if (shouldAddRandomPause()) await sleep(getRandomPauseDelay());
 
@@ -1358,6 +1435,7 @@
         if (config.active) return;
 
         logger('Bot başlatılıyor...');
+        await closeOpenModals();
         const elements = findActiveElements();
 
         if (!elements) {
