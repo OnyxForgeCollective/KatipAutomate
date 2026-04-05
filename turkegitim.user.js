@@ -290,6 +290,8 @@
     }
 
     // --- POPUP KAPATICI ---
+    // Görünür popup/modal katmanlarını tarar, uygun kapat/devam butonunu tıklar.
+    // return: En az bir popup kapatıldıysa true, aksi halde false.
     async function closeOpenModals() {
         // turkegitim modal id pattern: dvXxxPenceresi
         const popupSelectors = [
@@ -303,6 +305,7 @@
 
         // Common dismiss/close button texts (Turkish + generic)
         const dismissTexts = ['Kapat', 'Tamam', 'Devam', 'Başla', 'Onayla', 'Evet', 'OK', '×', 'x'];
+        const dismissTextsLower = dismissTexts.map(t => t.toLowerCase());
 
         let anyClosed = false;
 
@@ -323,7 +326,7 @@
                 for (const btn of buttons) {
                     if (btn.closest('#turkegitim-panel')) continue;
                     const text = btn.textContent.trim().toLowerCase();
-                    if (dismissTexts.some(t => text.includes(t.toLowerCase()))) {
+                    if (dismissTextsLower.some(t => text.includes(t))) {
                         logger(`Popup kapatılıyor: "${btn.textContent.trim()}" butonuna basılıyor`);
                         btn.click();
                         anyClosed = true;
@@ -817,7 +820,7 @@
             // Auto-resume after page navigation: close any intro/popup modals first, then start
             setTimeout(async () => {
                 await closeOpenModals();
-                startBot();
+                await startBot();
             }, 1000);
         }
     }

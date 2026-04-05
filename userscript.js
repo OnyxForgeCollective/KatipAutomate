@@ -752,6 +752,7 @@
         ];
 
         const dismissTexts = ['Kapat', 'Tamam', 'Devam', 'Başla', 'Onayla', 'Evet', 'OK', '×', 'x'];
+        const dismissTextsLower = dismissTexts.map(t => t.toLowerCase());
         let anyClosed = false;
 
         for (const selector of popupSelectors) {
@@ -768,7 +769,7 @@
                 for (const btn of buttons) {
                     if (btn.closest('#katip-v12-panel')) continue;
                     const text = (btn.textContent || '').trim().toLowerCase();
-                    if (dismissTexts.some(t => text.includes(t.toLowerCase()))) {
+                    if (dismissTextsLower.some(t => text.includes(t))) {
                         logger(`Popup kapatılıyor: "${(btn.textContent || '').trim()}" butonuna basılıyor`);
                         btn.click();
                         anyClosed = true;
@@ -856,6 +857,10 @@
         updateStats(key);
     }
 
+    // Tuşu bir kez gönderir, ACK bekler; ACK yoksa odak yenileyip tek sefer retry yapar.
+    // acknowledgeFn: Tuşun işlendiğini doğrulayan opsiyonel fonksiyon (true/false).
+    // maxWait: İlk deneme sonrası ACK bekleme üst sınırı (ms).
+    // return: ACK alındıysa true, aksi halde false.
     async function simulateKeyWithRetry(element, char, acknowledgeFn = null, maxWait = 320) {
         if (!element) return false;
 
