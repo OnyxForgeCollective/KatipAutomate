@@ -286,9 +286,63 @@
         userErrorListenerAdded = true;
     }
 
+    // --- POPUP KAPATICI ---
+    async function closeOpenModals() {
+        // turkegitim modal id pattern: dvXxxPenceresi
+        const popupSelectors = [
+            '[id*="Penceresi"]',
+            '[id*="Modal"]',
+            '[id*="Popup"]',
+            '.modal',
+            '.popup',
+            '.overlay',
+        ];
+
+        // Common dismiss/close button texts (Turkish + generic)
+        const dismissTexts = ['Kapat', 'Tamam', 'Devam', 'Başla', 'Onayla', 'Evet', 'OK', '×', 'x'];
+
+        let anyClosed = false;
+
+        for (const selector of popupSelectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+                if (!el) continue;
+                // Skip the bot panel itself
+                if (el.id === 'turkegitim-panel' || el.closest('#turkegitim-panel')) continue;
+
+                // Skip hidden elements
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) continue;
+                if (el.style.display === 'none') continue;
+
+                // Look for a close/dismiss button inside
+                const buttons = el.querySelectorAll('button, [type="button"], [role="button"], a.btn, .btn');
+                for (const btn of buttons) {
+                    if (btn.closest('#turkegitim-panel')) continue;
+                    const text = btn.textContent.trim().toLowerCase();
+                    if (dismissTexts.some(t => text.includes(t.toLowerCase()))) {
+                        logger(`Popup kapatılıyor: "${btn.textContent.trim()}" butonuna basılıyor`);
+                        btn.click();
+                        anyClosed = true;
+                        await sleep(300);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (anyClosed) await sleep(500);
+        return anyClosed;
+    }
+
     // --- TUŞ SİMÜLASYONU ---
     function simulateKey(element, char) {
         if (!element) return;
+
+        // Ensure the element has focus; unfocused elements may silently drop dispatched events
+        if (document.activeElement !== element) {
+            element.focus();
+        }
 
         let key, code, keyCode;
 
@@ -367,6 +421,8 @@
                         localStorage.setItem('turkegitim-auto-resume', 'true');
                         nextBtn.click();
                         await sleep(2000); // Wait for potential page reload or ajax update
+                        // Close any popup/modal that may have appeared on the new lesson page
+                        await closeOpenModals();
                         dynamicDelayOffset = 0;
                         continue;
                     }
@@ -474,9 +530,17 @@
                 waited += 20;
             }
 
-            // Extra safety delay if we hit the max wait (e.g. site is lagging)
+            // If the site never acknowledged the keystroke, refocus and retry once
             if (waited >= maxWait) {
-                await sleep(100);
+                logger('Tuş yanıt vermedi, odak yenileniyor ve tekrar deneniyor...', 'warn');
+                input.focus();
+                await sleep(50);
+                if (requiresEnter) {
+                    simulateKey(input, "Enter");
+                } else {
+                    simulateKey(input, charToType);
+                }
+                await sleep(150);
             }
 
             // Optional scrolling
@@ -746,8 +810,11 @@
         document.getElementById('m-clear').oninput = function() { config.mistakeClearChance = Math.min(100, Math.max(0, parseInt(this.value)||0)); localStorage.setItem('turkegitim-mistake-clear-chance', config.mistakeClearChance); };
 
         if (config.active) {
-            // Auto-resume triggered
-            setTimeout(startBot, 500);
+            // Auto-resume after page navigation: close any intro/popup modals first, then start
+            setTimeout(async () => {
+                await closeOpenModals();
+                startBot();
+            }, 1000);
         }
     }
 
