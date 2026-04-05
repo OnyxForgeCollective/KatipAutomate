@@ -143,6 +143,9 @@
 
     function simulateBackspace(element) {
         if (!element) return;
+        if (document.activeElement !== element) {
+            element.focus();
+        }
         const eventObj = { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, cancelable: true };
         element.dispatchEvent(new KeyboardEvent('keydown', eventObj));
         element.dispatchEvent(new KeyboardEvent('keypress', eventObj));
@@ -286,9 +289,69 @@
         userErrorListenerAdded = true;
     }
 
+    // --- POPUP KAPATICI ---
+    /**
+     * Görünür popup/modal katmanlarını tarar ve uygun kapat/devam butonunu tıklar.
+     * @returns {Promise<boolean>} En az bir popup kapatıldıysa true.
+     */
+    async function closeOpenModals() {
+        // turkegitim modal id pattern: dvXxxPenceresi
+        const popupSelectors = [
+            '[id*="Penceresi"]',
+            '[id*="Modal"]',
+            '[id*="Popup"]',
+            '.modal',
+            '.popup',
+            '.overlay',
+        ];
+
+        // Common dismiss/close button texts (Turkish + generic)
+        const dismissTexts = ['Kapat', 'Tamam', 'Devam', 'Başla', 'Onayla', 'Evet', 'OK', '×', 'x'];
+        const dismissTextsLower = dismissTexts.map(t => t.toLowerCase());
+
+        let anyClosed = false;
+
+        for (const selector of popupSelectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+                if (!el) continue;
+                // Skip the bot panel itself
+                if (el.id === 'turkegitim-panel' || el.closest('#turkegitim-panel')) continue;
+
+                // Skip hidden elements
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) continue;
+                if (el.style.display === 'none') continue;
+
+                // Look for a close/dismiss button inside
+                const buttons = el.querySelectorAll('button, [type="button"], [role="button"], a.btn, .btn');
+                for (const btn of buttons) {
+                    if (btn.closest('#turkegitim-panel')) continue;
+                    const buttonText = (btn.textContent || '').trim();
+                    const text = buttonText.toLowerCase();
+                    if (dismissTextsLower.some(t => text.includes(t))) {
+                        logger(`Popup kapatılıyor: "${buttonText}" butonuna basılıyor`);
+                        btn.click();
+                        anyClosed = true;
+                        await sleep(300);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (anyClosed) await sleep(500);
+        return anyClosed;
+    }
+
     // --- TUŞ SİMÜLASYONU ---
     function simulateKey(element, char) {
         if (!element) return;
+
+        // Ensure the element has focus; unfocused elements may silently drop dispatched events
+        if (document.activeElement !== element) {
+            element.focus();
+        }
 
         let key, code, keyCode;
 
@@ -349,12 +412,31 @@
         return null;
     }
 
+    function getLessonProgressSignature(source, keyboardDiv) {
+        const spans = source ? Array.from(source.querySelectorAll('span')) : [];
+        let activeIndex = -1;
+        let correctCount = 0;
+        let errorCount = 0;
+
+        for (let i = 0; i < spans.length; i++) {
+            const span = spans[i];
+            const cls = span.className || '';
+            if (activeIndex === -1 && cls.includes('sVurguluHarf1')) activeIndex = i;
+            if (cls.includes('sHataliHarf') || span.style.color === 'red') errorCount++;
+            if (cls.includes('sDogruHarf') || cls.includes('text-success')) correctCount++;
+        }
+
+        const hasEnterBg = !!(keyboardDiv && keyboardDiv.style.backgroundImage && keyboardDiv.style.backgroundImage.includes('VurguluKlavyeEnteri'));
+        return `${activeIndex}|${correctCount}|${errorCount}|${hasEnterBg ? 'E' : 'N'}`;
+    }
+
     // --- DÖNGÜ (TURKEGITIM) ---
     async function loopLesson(elements) {
         const { source, input } = elements;
         input.focus();
 
         let mistakeCharCount = 0;
+        let noProgressStreak = 0;
 
         while (config.active) {
             // Check for completion modal first
@@ -367,6 +449,8 @@
                         localStorage.setItem('turkegitim-auto-resume', 'true');
                         nextBtn.click();
                         await sleep(2000); // Wait for potential page reload or ajax update
+                        // Close any popup/modal that may have appeared on the new lesson page
+                        await closeOpenModals();
                         dynamicDelayOffset = 0;
                         continue;
                     }
@@ -443,6 +527,9 @@
                 simulateKey(input, charToType);
             }
 
+            const beforeWaitKeyboard = document.getElementById('dvKlavye');
+            const beforeSignature = getLessonProgressSignature(source, beforeWaitKeyboard);
+
             // Wait for the UI to register the keystroke and advance the cursor
             let waited = 0;
             const maxWait = 2000;
@@ -454,29 +541,38 @@
             }
 
             while (config.active && waited < maxWait) {
-                // If we typed Enter, wait for the keyboard background to clear the Enter state
-                // OR for a new active span to appear that wasn't there before.
-                if (requiresEnter) {
-                    const currentKeyboard = document.getElementById('dvKlavye');
-                    const hasEnterBg = currentKeyboard && currentKeyboard.style.backgroundImage && currentKeyboard.style.backgroundImage.includes('VurguluKlavyeEnteri');
-
-                    if (!hasEnterBg) {
-                        break;
-                    }
-                } else {
-                    // Normal character typing: wait for the active span to change to the next letter
-                    const currentActive = source.querySelector('.sVurguluHarf1');
-                    if (currentActive !== activeSpan) {
-                        break;
-                    }
+                const currentKeyboard = document.getElementById('dvKlavye');
+                const currentSignature = getLessonProgressSignature(source, currentKeyboard);
+                if (currentSignature !== beforeSignature) {
+                    noProgressStreak = 0;
+                    break;
                 }
                 await sleep(20);
                 waited += 20;
             }
 
-            // Extra safety delay if we hit the max wait (e.g. site is lagging)
+            // If the site never acknowledged the keystroke, refocus and retry once
             if (waited >= maxWait) {
-                await sleep(100);
+                noProgressStreak++;
+                if (noProgressStreak % 3 === 0) {
+                    logger('Tuş yanıt vermedi, odak yenileniyor ve tekrar deneniyor...', 'warn');
+                }
+                input.focus();
+                await sleep(50);
+                if (requiresEnter) {
+                    simulateKey(input, "Enter");
+                } else {
+                    simulateKey(input, charToType);
+                }
+                await sleep(120);
+
+                const afterRetryKeyboard = document.getElementById('dvKlavye');
+                const afterRetrySignature = getLessonProgressSignature(source, afterRetryKeyboard);
+                if (afterRetrySignature === beforeSignature) {
+                    await sleep(80);
+                } else {
+                    noProgressStreak = 0;
+                }
             }
 
             // Optional scrolling
@@ -494,6 +590,7 @@
     // --- KONTROL ---
     async function startBot() {
         if (config.active) return;
+        await closeOpenModals();
         const elements = findActiveElements();
         if (!elements) return;
 
@@ -746,8 +843,13 @@
         document.getElementById('m-clear').oninput = function() { config.mistakeClearChance = Math.min(100, Math.max(0, parseInt(this.value)||0)); localStorage.setItem('turkegitim-mistake-clear-chance', config.mistakeClearChance); };
 
         if (config.active) {
-            // Auto-resume triggered
-            setTimeout(startBot, 500);
+            // Auto-resume after page navigation: close any intro/popup modals first, then start
+            setTimeout(() => {
+                (async () => {
+                    await closeOpenModals();
+                    await startBot();
+                })().catch(err => logger(`Auto-resume hatası: ${err?.message || err}`, 'error'));
+            }, 1000);
         }
     }
 
