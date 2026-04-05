@@ -290,8 +290,10 @@
     }
 
     // --- POPUP KAPATICI ---
-    // Görünür popup/modal katmanlarını tarar, uygun kapat/devam butonunu tıklar.
-    // return: En az bir popup kapatıldıysa true, aksi halde false.
+    /**
+     * Görünür popup/modal katmanlarını tarar ve uygun kapat/devam butonunu tıklar.
+     * @returns {Promise<boolean>} En az bir popup kapatıldıysa true.
+     */
     async function closeOpenModals() {
         // turkegitim modal id pattern: dvXxxPenceresi
         const popupSelectors = [
@@ -325,9 +327,10 @@
                 const buttons = el.querySelectorAll('button, [type="button"], [role="button"], a.btn, .btn');
                 for (const btn of buttons) {
                     if (btn.closest('#turkegitim-panel')) continue;
-                    const text = (btn.textContent || '').trim().toLowerCase();
+                    const buttonText = (btn.textContent || '').trim();
+                    const text = buttonText.toLowerCase();
                     if (dismissTextsLower.some(t => text.includes(t))) {
-                        logger(`Popup kapatılıyor: "${(btn.textContent || '').trim()}" butonuna basılıyor`);
+                        logger(`Popup kapatılıyor: "${buttonText}" butonuna basılıyor`);
                         btn.click();
                         anyClosed = true;
                         await sleep(300);

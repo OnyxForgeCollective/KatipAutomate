@@ -741,6 +741,10 @@
     }
 
     // --- POPUP KAPATICI ---
+    /**
+     * Görünür popup/modal katmanlarını tarar ve uygun kapat/devam butonlarına tıklar.
+     * @returns {Promise<boolean>} En az bir popup kapatıldıysa true.
+     */
     async function closeOpenModals() {
         const popupSelectors = [
             '[id*="Penceresi"]',
@@ -768,9 +772,10 @@
                 const buttons = el.querySelectorAll('button, [type="button"], [role="button"], a.btn, .btn');
                 for (const btn of buttons) {
                     if (btn.closest('#katip-v12-panel')) continue;
-                    const text = (btn.textContent || '').trim().toLowerCase();
+                    const buttonText = (btn.textContent || '').trim();
+                    const text = buttonText.toLowerCase();
                     if (dismissTextsLower.some(t => text.includes(t))) {
-                        logger(`Popup kapatılıyor: "${(btn.textContent || '').trim()}" butonuna basılıyor`);
+                        logger(`Popup kapatılıyor: "${buttonText}" butonuna basılıyor`);
                         btn.click();
                         anyClosed = true;
                         await sleep(300);
@@ -857,10 +862,14 @@
         updateStats(key);
     }
 
-    // Tuşu bir kez gönderir, ACK bekler; ACK yoksa odak yenileyip tek sefer retry yapar.
-    // acknowledgeFn: Tuşun işlendiğini doğrulayan opsiyonel fonksiyon (true/false).
-    // maxWait: İlk deneme sonrası ACK bekleme üst sınırı (ms).
-    // return: ACK alındıysa true, aksi halde false.
+    /**
+     * Tuşu gönderir, ACK bekler; ACK yoksa odak yenileyip bir kez daha dener.
+     * @param {HTMLElement} element Hedef input/textarea.
+     * @param {string} char Basılacak karakter.
+     * @param {(() => boolean)|null} acknowledgeFn Tuş işlendi kontrolü (opsiyonel).
+     * @param {number} maxWait İlk deneme sonrası ACK için maksimum bekleme (ms).
+     * @returns {Promise<boolean>} ACK alındıysa true.
+     */
     async function simulateKeyWithRetry(element, char, acknowledgeFn = null, maxWait = 320) {
         if (!element) return false;
 
