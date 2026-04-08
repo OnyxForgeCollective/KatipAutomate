@@ -34,6 +34,7 @@
         humanLikeTyping: localStorage.getItem('katip-human-like') === 'true',
         autoCorrectEnabled: localStorage.getItem('katip-auto-correct') === 'true',
         autoNextLesson: localStorage.getItem('katip-auto-next') === 'true',
+        autoNextDelay: parseInt(localStorage.getItem('katip-auto-next-delay')) || 5000,
         // --- Hata Sistemi ---
         mistakeModeEnabled: localStorage.getItem('katip-mistake-mode-enabled') === 'true',
         mistakeEveryWords: parseInt(localStorage.getItem('katip-mistake-every-words')) || 5,
@@ -484,9 +485,14 @@
     function updateStats(char) {
         stats.totalChars++;
 
-        // Count words properly: increment when transitioning from space to non-space
+        // Standard WPM calculation logic: A word is typically 5 characters including spaces.
+        // We calculate it dynamically instead of just string space boundaries.
+        // But for visual limit counting, we also keep track of actual completed words
+        // by detecting transitions from non-space to space.
         const isSpace = (char === ' ' || char === '\n' || char === '\t');
-        if (!isSpace && lastCharWasSpace) {
+
+        // When transitioning from non-space to space, we've completed a word.
+        if (isSpace && !lastCharWasSpace) {
             stats.totalWords++;
 
             // Check if word limit is reached
@@ -500,7 +506,10 @@
         if (stats.startTime) {
             const elapsedMinutes = (Date.now() - stats.startTime) / 60000;
             if (elapsedMinutes > 0) {
-                stats.currentWPM = Math.round(stats.totalWords / elapsedMinutes);
+                // Using standard WPM formula: (total characters / 5) / elapsed_minutes
+                // This provides much smoother, accurate standard WPM that doesn't jump wildly
+                // compared to just dividing exact word count.
+                stats.currentWPM = Math.round((stats.totalChars / 5) / elapsedMinutes);
             }
         }
     }
@@ -533,18 +542,14 @@
         if (!config.delay || config.delay < 1) {
             return 0;
         }
-        // Ortalama kelime uzunluğu (İngilizce için ~5, Türkçe için ~6)
-        const avgWordLength = 6;
-        // Kelime arası boşluk
-        const spaceChar = 1;
-        // Ortalama kelime karakter sayısı (harf + boşluk)
-        const avgCharsPerWord = avgWordLength + spaceChar;
+        // For standardized WPM calculations worldwide, 1 word = 5 characters (including spaces)
+        const charsPerWord = 5;
         // Dakikadaki milisaniye
         const msPerMinute = 60000;
-        // config.delay ms'de bir karakter yazılıyor
+        // config.delay ms'de bir karakter yazılıyor (average delay logic + human random delay causes overhead)
         const charsPerMinute = msPerMinute / config.delay;
-        // Dakikadaki kelime sayısı
-        const wordsPerMinute = Math.round(charsPerMinute / avgCharsPerWord);
+        // Dakikadaki kelime sayısı (Formula: (chars/min) / 5)
+        const wordsPerMinute = Math.round(charsPerMinute / charsPerWord);
         return wordsPerMinute;
     }
 
@@ -1172,7 +1177,18 @@
                     const nextLessonBtn = document.querySelector('a[onclick="dersdegistir(\'i\')"]');
 
                     if (nextLessonBtn) {
-                        logger('Tüm spanlar bitti, Sonraki Ders butonuna basılıyor...');
+                        logger(`Tüm spanlar bitti. Modalı okumanız için ${config.autoNextDelay / 1000} saniye bekleniyor...`);
+
+                        // Kullanıcının modalı görmesi ve sitenin kendisini toparlaması için bekleme süresi
+                        let preWait = 0;
+                        while (preWait < config.autoNextDelay) {
+                            if (!config.active) break;
+                            await sleep(250);
+                            preWait += 250;
+                        }
+                        if (!config.active) break;
+
+                        logger('Bekleme süresi doldu, Sonraki Ders butonuna basılıyor...');
                         nextLessonBtn.click();
 
                         // Wait for the new content to appear safely (up to 15 seconds)
@@ -1200,9 +1216,13 @@
                              logger('Yeni ders içeriği başarıyla yüklendi, yazmaya devam ediliyor.');
                              firstIteration = true;
                              input.value = "";
+
+                             // Yeni derse geçildiğinde İstatistikleri ve hızı TAMPAMEN sıfırla
+                             // Aksi halde eski dersin süresi hız hesaplamasını bozup scripti çok hızlı yazmaya zorlar.
                              stats.totalWords = 0;
+                             stats.totalChars = 0;
                              stats.mistakeWordCount = 0;
-                             // Delay dynamic offset'i sıfırlıyoruz ki hız sapmasın
+                             stats.startTime = Date.now(); // Timer'ı resetle
                              dynamicDelayOffset = 0;
                              continue;
                         } else if (config.active) {
@@ -1219,7 +1239,7 @@
                 }
 
                 // Auto-next is off or it's just a section within a lesson
-                const firstSpanText = spans[0].textContent;
+                const firstSpanText = spans.length > 0 ? spans[0].textContent : "";
                 const spanCount = spans.length;
 
                 let waited = 0;
@@ -1765,6 +1785,17 @@
                         </label>
                     </div>
 
+                    <div class="katip-setting-row" id="auto-next-delay-row" style="display: ${config.autoNextLesson ? 'flex' : 'none'};">
+                        <div>
+                            <div class="katip-setting-label">Bekleme Süresi</div>
+                            <div class="katip-setting-desc">Ders bittikten sonra (sn)</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <input type="number" id="auto-next-delay-input" class="katip-input" min="0" max="60" value="${config.autoNextDelay / 1000}">
+                            <span style="font-size:11px; color:var(--katip-text-muted)">sn</span>
+                        </div>
+                    </div>
+
                     <div class="katip-setting-row">
                         <div>
                             <div class="katip-setting-label">Otomatik Düzeltme</div>
@@ -1936,7 +1967,20 @@
         document.getElementById('auto-next-toggle').onchange = function() {
             config.autoNextLesson = this.checked;
             localStorage.setItem('katip-auto-next', this.checked);
+            const delayRow = document.getElementById('auto-next-delay-row');
+            if(delayRow) delayRow.style.display = this.checked ? 'flex' : 'none';
         };
+
+        const autoNextDelayInput = document.getElementById('auto-next-delay-input');
+        if (autoNextDelayInput) {
+            autoNextDelayInput.oninput = function() {
+                let val = parseInt(this.value);
+                if (val < 0) val = 0;
+                if (val > 60) val = 60;
+                config.autoNextDelay = val * 1000;
+                localStorage.setItem('katip-auto-next-delay', config.autoNextDelay);
+            };
+        }
 
         document.getElementById('auto-correct-toggle').onchange = function() {
             config.autoCorrectEnabled = this.checked;
